@@ -1,4 +1,4 @@
-// Call logs page: fetches /api/calls and renders the summary, daily chart, daily table and call log.
+// Zoom call log page: fetches /api/zoom/calls and renders the summary, daily chart, daily table and call log.
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'zoom-call-logs';
@@ -190,7 +190,11 @@ async function load({ refresh = false } = {}) {
 
   setBusy(true);
   try {
-    const res = await fetch(`/api/calls?${params}`);
+    const res = await fetch(`/api/zoom/calls?${params}`);
+    if (res.status === 401) {
+      location.href = '/'; // signed out: the CRM page shows the sign-in form
+      return;
+    }
     const body = await res.json().catch(() => ({}));
     if (seq !== requestSeq) return;
     if (!res.ok) throw new Error(body.error || `Request failed (HTTP ${res.status}).`);

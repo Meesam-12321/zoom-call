@@ -1,7 +1,7 @@
 import { addDays, dayKey, diffDays, parseDay, zonedParts } from './time.js';
 
 // Zoom call_result values that mean the line was answered.
-const ANSWERED = new Set(['answered', 'accepted', 'picked_up', 'connected', 'succeeded']);
+export const ANSWERED = new Set(['answered', 'accepted', 'picked_up', 'connected', 'succeeded']);
 
 // For outgoing calls Zoom also reports "connected" when voicemail, a phone menu or a "number not in service"
 // recording answers, and no field tells those apart from a person. Outgoing calls that end within this many

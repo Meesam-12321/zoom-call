@@ -3,102 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Call Logs · Zoom Phone</title>
+    <title>Cold-Calling CRM</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/crm.css" />
   </head>
   <body>
-    <main class="page">
-      <header class="header">
-        <div>
-          <h1>Call logs</h1>
-          <p class="subtitle" id="subtitle">Zoom Phone</p>
-        </div>
-        <div class="controls">
-          <label class="field">
-            <span>Period</span>
-            <select id="preset">
-              <optgroup label="Single day">
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="day_before_yesterday">Day before yesterday</option>
-                <option value="date">Pick a date…</option>
-              </optgroup>
-              <optgroup label="Range">
-                <option value="last_7_days">Last 7 days</option>
-                <option value="last_30_days">Last 30 days</option>
-                <option value="this_month">This month</option>
-                <option value="last_month">Last month</option>
-                <option value="last_90_days">Last 90 days</option>
-                <option value="custom">Custom range…</option>
-              </optgroup>
-            </select>
-          </label>
-          <div class="day-nav" id="dayNav" hidden>
-            <button class="btn secondary icon-only" id="prevDay" type="button" aria-label="Previous day" title="Previous day"></button>
-            <label class="field"><span>Date</span><input type="date" id="date" /></label>
-            <button class="btn secondary icon-only" id="nextDay" type="button" aria-label="Next day" title="Next day"></button>
-          </div>
-          <div class="custom" id="custom" hidden>
-            <label class="field"><span>From</span><input type="date" id="from" /></label>
-            <label class="field"><span>To</span><input type="date" id="to" /></label>
-            <button class="btn secondary" id="apply" type="button">Apply</button>
-          </div>
-          <label class="field">
-            <span>Timezone</span>
-            <select id="tz"></select>
-          </label>
-          <button class="btn" id="refresh" type="button" title="Fetch the latest calls from Zoom"></button>
-        </div>
-      </header>
-
-      <div class="alert" id="error" role="alert" hidden></div>
-      <div class="note" id="note" hidden></div>
-      <div class="loading-state" id="loading">Loading calls from Zoom…</div>
-
-      <div id="content" hidden>
-        <section class="stats" id="stats" aria-label="Summary"></section>
-
-        <section class="card panel" id="chartPanel">
-          <div class="panel-head">
-            <h2>Calls per day</h2>
-            <span class="muted" id="chartNote"></span>
-          </div>
-          <div class="chart" id="chart"></div>
-        </section>
-
-        <section class="card panel" id="daysPanel">
-          <div class="panel-head">
-            <h2>Daily summary</h2>
-            <span class="muted">Click a day to jump to its calls</span>
-          </div>
-          <div class="table-wrap scroll">
-            <table class="table" id="daysTable">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th class="num">Calls</th>
-                  <th class="num">Connected</th>
-                  <th class="num">Not connected</th>
-                  <th class="num">Talk time</th>
-                  <th class="num">Avg duration</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </section>
-
-        <div class="panel-head section-head">
-          <h2 class="section-title">Call log</h2>
-          <span class="muted" id="logNote" hidden></span>
-        </div>
-        <div id="log"></div>
-      </div>
-    </main>
-    <div class="tooltip" id="tooltip" hidden></div>
-    <script type="module" src="/app.js"></script>
+    <div id="app"><div class="loading-state">Loading…</div></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <script type="module" src="/js/main.js"></script>
   </body>
 </html>

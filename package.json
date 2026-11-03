@@ -1,18 +1,19 @@
 {
   "name": "zoom-call-logs",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Simple Zoom Phone call log viewer: daily call counts, call durations and averages.",
+  "description": "Cold-calling CRM: leads from Excel, Zoom Phone click-to-call with automatic call logging, outcomes, pipeline, tasks and analytics.",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch-path=server server/index.js",
-    "test": "node --test"
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch-path=server server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
   },
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22.13"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "express": "^5.1.0"
   }
 }

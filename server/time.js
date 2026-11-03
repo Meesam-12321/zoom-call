@@ -45,6 +45,26 @@ export function startOfDay({ year, month, day }, tz) {
   return new Date(guess - (second === first ? first : second));
 }
 
+/** A wall-clock time in `tz` ("2026-11-04T15:30") as a UTC Date, or null if the value is not a valid time. */
+export function zonedDateTime(value, tz) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(String(value || ''));
+  const day = m && parseDay(m[1]);
+  const hour = Number(m?.[2]);
+  const minute = Number(m?.[3]);
+  if (!day || hour > 23 || minute > 59) return null;
+  const target = Date.UTC(day.year, day.month - 1, day.day, hour, minute);
+  const first = offsetMs(new Date(target), tz);
+  const second = offsetMs(new Date(target - first), tz);
+  return new Date(target - (second === first ? first : second));
+}
+
+/** [start, end) of today in `tz`. */
+export function todayBounds(tz, now = new Date()) {
+  const p = zonedParts(now, tz);
+  const today = { year: p.year, month: p.month, day: p.day };
+  return { start: startOfDay(today, tz), end: startOfDay(addDays(today, 1), tz) };
+}
+
 export function addDays({ year, month, day }, n) {
   const d = new Date(Date.UTC(year, month - 1, day + n));
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
@@ -67,6 +87,7 @@ export function parseDay(value) {
 const LABELS = {
   today: 'Today',
   yesterday: 'Yesterday',
+  this_week: 'This week',
   last_7_days: 'Last 7 days',
   last_30_days: 'Last 30 days',
   last_90_days: 'Last 90 days',
@@ -91,6 +112,12 @@ export function resolveRange({ preset, from, to, date, tz = 'UTC', now = new Dat
     case 'yesterday':
       first = last = addDays(today, -1);
       break;
+    case 'this_week': {
+      // Weeks start on Monday.
+      const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
+      first = addDays(today, -((weekday + 6) % 7));
+      break;
+    }
     case 'last_7_days':
       first = addDays(today, -6);
       break;
