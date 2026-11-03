@@ -1,7 +1,12 @@
 import { addDays, dayKey, diffDays, parseDay, zonedParts } from './time.js';
 
-// Zoom call_result values that mean the call connected.
-const CONNECTED = new Set(['answered', 'accepted', 'picked_up', 'connected', 'succeeded']);
+// Zoom call_result values that mean the line was answered.
+const ANSWERED = new Set(['answered', 'accepted', 'picked_up', 'connected', 'succeeded']);
+
+// For outgoing calls Zoom also reports "connected" when voicemail, a phone menu or a "number not in service"
+// recording answers, and no field tells those apart from a person. Outgoing calls that end within this many
+// seconds of being answered therefore count as not connected. MIN_CONNECTED_SECONDS in .env overrides it.
+export const DEFAULT_MIN_CONNECTED_SECONDS = 10;
 
 const RESULT_LABELS = {
   answered: 'Answered',
@@ -26,7 +31,7 @@ const RESULT_LABELS = {
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
-export function normalizeCall(item) {
+export function normalizeCall(item, minConnectedSeconds = DEFAULT_MIN_CONNECTED_SECONDS) {
   const id = item.call_history_uuid || item.id;
   const start = Date.parse(item.start_time);
   if (!id || Number.isNaN(start)) return null;
@@ -34,30 +39,37 @@ export function normalizeCall(item) {
   const them = outbound ? 'callee' : 'caller';
   const us = outbound ? 'caller' : 'callee';
   const result = item.call_result || 'unknown';
+  const duration = Math.max(0, Number(item.duration) || 0);
+  const answeredAt = Date.parse(item.answer_time);
+  const tooShort = outbound && ANSWERED.has(result) && duration < minConnectedSeconds;
   return {
     id,
     start,
     direction: outbound ? 'outbound' : 'inbound',
-    connected: CONNECTED.has(result),
-    result: RESULT_LABELS[result] || result.replace(/_/g, ' '),
+    connected: ANSWERED.has(result) && !tooShort,
+    tooShort,
+    result: tooShort ? 'Not connected' : RESULT_LABELS[result] || result.replace(/_/g, ' '),
     number: item[`${them}_did_number`] || item[`${them}_ext_number`] || '',
     name: item[`${them}_name`] || '',
     agent: item[`${us}_name`] || '',
-    duration: Math.max(0, Number(item.duration) || 0),
+    duration,
+    // Seconds it rang before the line was answered; null if it never was.
+    ringTime: Number.isNaN(answeredAt) ? null : Math.max(0, Math.round((answeredAt - start) / 1000)),
   };
 }
 
 /**
  * Definitions:
+ *  - connected      = Zoom says the line was answered and, for outgoing calls, it lasted ≥ minConnectedSeconds
  *  - talk time      = sum of durations of connected calls
  *  - avg duration   = talk time ÷ connected calls
  *  - avg calls/day  = all calls ÷ calendar days in the range (days without calls count as 0)
  */
-export function buildReport(items, range) {
+export function buildReport(items, range, { minConnectedSeconds = DEFAULT_MIN_CONNECTED_SECONDS } = {}) {
   const from = range.from.getTime();
   const to = range.to.getTime();
   const calls = items
-    .map(normalizeCall)
+    .map((item) => normalizeCall(item, minConnectedSeconds))
     .filter((c) => c && c.start >= from && c.start < to)
     .sort((a, b) => b.start - a.start);
 
@@ -88,6 +100,7 @@ export function buildReport(items, range) {
 
   return {
     range: { preset: range.preset, label: range.label, tz: range.tz, firstDay: range.firstDay, lastDay: range.lastDay },
+    minConnectedSeconds,
     summary: {
       totalCalls: calls.length,
       connected: connected.length,

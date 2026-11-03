@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { fetchCallHistory, HISTORY_DAYS, ZoomError } from './zoom.js';
-import { buildReport } from './report.js';
+import { buildReport, DEFAULT_MIN_CONNECTED_SECONDS } from './report.js';
 import { isValidTimeZone, resolveRange } from './time.js';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -12,6 +12,9 @@ if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 const PORT = Number(process.env.PORT) || 4000;
 // Call data is private: only listen on this computer unless HOST is set explicitly.
 const HOST = process.env.HOST || '127.0.0.1';
+// Outgoing calls that end within this many seconds of being answered count as not connected (see report.js).
+const minSetting = Number(process.env.MIN_CONNECTED_SECONDS || NaN);
+const MIN_CONNECTED_SECONDS = minSetting >= 0 ? minSetting : DEFAULT_MIN_CONNECTED_SECONDS;
 const CACHE_MS = 60_000;
 const cache = new Map();
 
@@ -37,7 +40,7 @@ app.get('/api/calls', async (req, res) => {
   }
 
   res.json({
-    ...buildReport(entry.items, range),
+    ...buildReport(entry.items, range, { minConnectedSeconds: MIN_CONNECTED_SECONDS }),
     fetchedAt: new Date(entry.at).toISOString(),
     beforeZoomHistory: range.from.getTime() < earliest,
   });
@@ -49,4 +52,8 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: status === 500 ? 'Unexpected server error — check the terminal for details.' : err.message });
 });
 
-app.listen(PORT, HOST, () => console.log(`Zoom call logs → http://localhost:${PORT}`));
+// Express 5 hands startup errors (e.g. port already in use) to this callback instead of throwing.
+app.listen(PORT, HOST, (error) => {
+  if (error) throw error;
+  console.log(`Zoom call logs → http://localhost:${PORT}`);
+});

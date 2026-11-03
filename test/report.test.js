@@ -73,3 +73,27 @@ test('the contact is the other party: callee for outgoing, caller for incoming',
   assert.equal(inbound.result, 'No answer');
   assert.equal(inbound.agent, 'Agent');
 });
+
+test('short outgoing calls are not connected, because voicemail and phone menus also answer', () => {
+  const voicemail = normalizeCall(call({ duration: 4, start_time: '2026-11-02T10:00:00Z', answer_time: '2026-11-02T10:00:30Z' }));
+  assert.equal(voicemail.connected, false);
+  assert.equal(voicemail.tooShort, true);
+  assert.equal(voicemail.result, 'Not connected');
+  assert.equal(voicemail.ringTime, 30);
+
+  assert.equal(normalizeCall(call({ duration: 10 })).connected, true, 'the cutoff itself counts as connected');
+  assert.equal(normalizeCall(call({ duration: 4 }), 0).connected, true, '0 keeps Zoom’s result');
+  const inbound = normalizeCall(call({ direction: 'inbound', call_result: 'answered', duration: 4 }));
+  assert.equal(inbound.connected, true, 'Zoom knows when you answered an incoming call');
+  assert.equal(normalizeCall(call({ call_result: 'hang_up', duration: 0 })).ringTime, null);
+});
+
+test('short outgoing calls are left out of talk time and averages', () => {
+  const range = resolveRange({ preset: 'last_7_days', tz: 'UTC', now: NOW });
+  const report = buildReport([call({ duration: 60 }), call({ duration: 5 })], range, { minConnectedSeconds: 10 });
+  assert.equal(report.minConnectedSeconds, 10);
+  assert.equal(report.summary.connected, 1);
+  assert.equal(report.summary.notConnected, 1);
+  assert.equal(report.summary.talkTime, 60);
+  assert.equal(report.summary.avgDuration, 60);
+});

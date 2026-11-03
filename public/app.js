@@ -221,7 +221,7 @@ function showError(message) {
 // ---------- rendering
 
 function render() {
-  const { range, summary, days, calls, fetchedAt, beforeZoomHistory } = state.data;
+  const { range, summary, days, calls, fetchedAt, beforeZoomHistory, minConnectedSeconds } = state.data;
   const singleDay = range.firstDay === range.lastDay;
   const zone = ZONES.find(([z]) => z === range.tz)?.[1] || range.tz;
   const period = singleDay
@@ -235,6 +235,8 @@ function render() {
   $('loading').hidden = true;
   $('content').hidden = false;
   $('daysPanel').hidden = singleDay;
+  $('logNote').textContent = `Outgoing calls under ${minConnectedSeconds}s count as not connected: usually voicemail or a phone menu, which Zoom also marks connected.`;
+  $('logNote').hidden = !minConnectedSeconds;
 
   renderStats(summary, singleDay);
   renderChart([...days].reverse(), summary.avgPerDay);
@@ -440,6 +442,13 @@ function renderLog(days, calls, singleDay) {
   $('log').replaceChildren(...(sections.length ? sections : [empty]));
 }
 
+/** Hover text for a result: how long it rang, and why a short outgoing call is not connected. */
+function resultHint(call) {
+  if (call.ringTime == null) return null;
+  const rang = `Rang ${call.ringTime}s before the line was answered`;
+  return call.tooShort ? `${rang}, then ended after ${call.duration}s: usually voicemail, a phone menu or a wrong number.` : `${rang}.`;
+}
+
 function callRow(call, showUser) {
   const outbound = call.direction === 'outbound';
   const tone = call.connected ? 'ok' : outbound ? 'warn' : 'missed';
@@ -450,7 +459,7 @@ function callRow(call, showUser) {
     h('td', {}, h('span', { class: 'dir' }, icon(call.direction, 14), outbound ? 'Outgoing' : 'Incoming')),
     h('td', {}, h('div', { class: 'number' }, phone(call.number)), call.name && h('div', { class: 'muted small' }, call.name)),
     showUser && h('td', {}, call.agent || '—'),
-    h('td', {}, h('span', { class: `badge ${tone}` }, call.result)),
+    h('td', {}, h('span', { class: `badge ${tone}`, title: resultHint(call) }, call.result)),
     h('td', { class: `num${call.duration ? '' : ' muted'}` }, clock(call.duration)),
   );
 }

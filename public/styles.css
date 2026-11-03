@@ -217,8 +217,11 @@ h2 {
   font-weight: 600;
 }
 
+.section-head {
+  margin-top: 32px;
+}
+
 .section-title {
-  margin: 32px 0 16px;
   font-size: 20px;
 }
 

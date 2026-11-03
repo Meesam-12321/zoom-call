@@ -30,12 +30,18 @@ The credentials go in `.env` (see `.env.example`). They come from a **Server-to-
 
 | Number | Definition |
 |---|---|
-| Connected | Zoom result is answered, connected, accepted, picked up or succeeded |
+| Connected | Zoom says the call was answered and, for outgoing calls, it lasted at least 10 seconds after that (see below) |
 | Total talk time | Sum of the durations of connected calls |
 | Average call duration | Total talk time ÷ connected calls |
 | Average calls per day | All calls ÷ days in the selected period (days with no calls count as 0) |
 
 Days are calendar days in the timezone picked at the top of the page.
+
+### Why short outgoing calls are "Not connected"
+
+For outgoing calls Zoom reports **connected** whenever something answers the line: a person, but also voicemail, a phone menu or a "number not in service" recording. Zoom has no field that tells these apart, so the app goes by call length: an outgoing call that ends less than 10 seconds after it was answered counts as **Not connected**. Hover a call's result to see how long it rang first (voicemail usually answers after 20–30 seconds of ringing).
+
+To change the cutoff, set `MIN_CONNECTED_SECONDS` in `.env` and restart the server. `0` uses Zoom's result as is. A call where you listened to a voicemail greeting for longer, or left a message, still counts as connected.
 
 ## Good to know
 
