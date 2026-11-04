@@ -219,6 +219,10 @@ export class Store {
     if (!this.get('SELECT 1 FROM dispositions LIMIT 1')) {
       DEFAULT_DISPOSITIONS.forEach((d, i) => this.insert('dispositions', { ...d, position: i }));
     }
+    // Added after the first release. An outcome an admin removes stays in the table switched off, so this adds it only once.
+    if (!this.get("SELECT 1 FROM dispositions WHERE key = 'conversation'")) {
+      this.insert('dispositions', { ...DEFAULT_DISPOSITIONS.find((d) => d.key === 'conversation'), position: 3 });
+    }
   }
 
   statement(sql) {

@@ -1,8 +1,10 @@
 // Call lists (campaigns): the lists, one list's leads, and the dialer that goes through a list lead by lead.
 import { startCall } from '../call.js';
+import { canEditNote, noteDialog, snoozeButton } from '../followup.js';
 import { bestPhone, leadPanel } from '../lead.js';
+import { logCallDialog } from '../logcall.js';
 import {
-  api, badge, busy, confirmDialog, empty, exportButton, field, fmt, h, icon, meter, openModal, outcomeBadge, pageHead, stageBadge, toast,
+  api, badge, busy, confirmDialog, empty, exportButton, field, fill, fmt, h, icon, meter, openModal, outcomeBadge, pageHead, stageBadge, toast,
 } from '../ui.js';
 
 function newListDialog(ctx) {
@@ -38,9 +40,9 @@ export async function renderLists(root, params, ctx, isCurrent) {
             h('a', { class: 'list-name', href: `#/list/${l.id}` }, l.name),
             h('div', { class: 'muted small' }, `${fmt.date(l.created_at)}${l.created_by_name ? ` · ${l.created_by_name}` : ''}`)),
           h('div', { class: 'list-stats' },
-            [['Leads', l.total], ['Never called', l.never_called], ['Called today', l.called_today]].map(([label, value]) =>
+            [['Leads', l.total], ['No call logged', l.never_called], ['Logged today', l.called_today]].map(([label, value]) =>
               h('div', {}, h('strong', {}, fmt.num(value)), h('span', { class: 'muted small' }, label)))),
-          h('div', {}, meter(called, l.total, { goal: false }), h('div', { class: 'muted small section-gap-sm' }, `${fmt.num(called)} of ${fmt.num(l.total)} called at least once`)),
+          h('div', {}, meter(called, l.total, { goal: false }), h('div', { class: 'muted small section-gap-sm' }, `${fmt.num(called)} of ${fmt.num(l.total)} have a logged call`)),
           h('div', { class: 'row' },
             h('a', { class: 'btn call', href: `#/dial/${l.id}` }, icon('play', 14), 'Start dialing'),
             h('a', { class: 'btn secondary', href: `#/list/${l.id}` }, 'Open list')));
@@ -49,12 +51,127 @@ export async function renderLists(root, params, ctx, isCurrent) {
   );
 }
 
-export async function renderList(root, { id }, ctx, isCurrent) {
-  const { list, contacts } = await api(`/lists/${id}`);
-  if (!isCurrent()) return;
-  const reload = () => ctx.rerender();
+const LIST_VIEWS = [
+  ['all', 'All', () => true],
+  ['note', 'Called in Zoom, no note', (c) => c.zoom],
+  ['followup', 'Has a follow-up', (c) => c.task],
+  ['never', 'Not called yet', (c) => !c.attempts && !c.zoom],
+];
+
+/** Finds a lead by name, company or place, or by any part of a number however it is written. */
+function matchesSearch(c, text) {
+  const q = text.trim().toLowerCase();
+  if (!q) return true;
+  const digits = q.replace(/\D/g, '');
+  return [fmt.name(c), c.job_title, c.company_name, c.city, c.state].join(' ').toLowerCase().includes(q)
+    || (digits.length >= 3 && [c.mobile_e164, c.direct_e164, c.hq_phone_e164].some((number) => number?.includes(digits)));
+}
+
+// What happened last: a Zoom call nobody has recorded, the latest outcome, and the latest note.
+function lastCallCell(ctx, c, onChange) {
   const max = ctx.meta.settings.max_attempts;
-  const neverCalled = contacts.filter((c) => !c.attempts).length;
+  const note = c.last_note;
+  const noNoteOn = c.last_call && !c.last_call.notes && c.last_call;
+  const noteButton = (call, children, className) => h('button', { class: className, type: 'button', title: call.notes || null, onclick: () => noteDialog(call, onChange) }, children);
+  return h('td', { class: 'wrap last-call' },
+    c.zoom && h('div', { class: 'row' }, badge('Called in Zoom', 'warn'), h('span', { class: 'sub' }, `${fmt.ago(c.zoom.start_time)} · ${c.zoom.duration ? fmt.span(c.zoom.duration) : 'not answered'} · no note yet`)),
+    c.last_called_at && h('div', { class: 'row' }, outcomeBadge(ctx, c.last_disposition), h('span', { class: 'sub' }, `${fmt.ago(c.last_called_at)} · ${c.attempts} of ${max} attempts`)),
+    !c.zoom && !c.last_called_at && h('span', { class: 'muted' }, 'Not called yet'),
+    note && (canEditNote(ctx, note)
+      ? noteButton(note, note.notes, 'note-line')
+      : h('div', { class: 'note-line', title: note.notes }, note.notes)),
+    noNoteOn && canEditNote(ctx, noNoteOn) && noteButton(noNoteOn, [icon('note', 12), 'Add note'], 'link-btn'));
+}
+
+// What is next: the soonest open call task, which can be snoozed.
+function nextStepCell(ctx, c, onChange) {
+  if (!c.task) return h('td', { class: 'muted' }, '—');
+  const late = Date.parse(c.task.due_at) < Date.now();
+  return h('td', { class: 'next-step' },
+    h('div', {}, fmt.dateTime(c.task.due_at), late && [' ', badge('Late', 'warn')]),
+    h('div', { class: 'sub' }, c.task.title),
+    snoozeButton(ctx, c.task, onChange));
+}
+
+export async function renderList(root, { id }, ctx, isCurrent) {
+  let { list, contacts } = await api(`/lists/${id}`);
+  if (!isCurrent()) return;
+  const state = { q: '', view: 'all' };
+  const subtitle = h('span', {});
+  const chips = h('div', { class: 'chips' });
+  const tableBox = h('div', {});
+
+  // Redraws only the table, so the search, the chosen view and the scroll position stay where they were.
+  const refresh = async () => {
+    const data = await api(`/lists/${id}`);
+    if (!isCurrent()) return;
+    ({ list, contacts } = data);
+    draw();
+  };
+  const reload = () => ctx.rerender();
+
+  function row(c) {
+    const phone = bestPhone(c, c);
+    const blocked = Boolean(c.do_not_call || c.company_dnc);
+    return h('tr', {},
+      h('td', { class: 'title-cell' },
+        h('a', { href: `#/contact/${c.id}` }, fmt.name(c)),
+        h('div', { class: 'sub' }, h('a', { class: 'plain', href: `#/company/${c.company_id}` }, c.company_name)),
+        h('div', { class: 'sub' }, [c.job_title, [c.city, c.state].filter(Boolean).join(', ')].filter(Boolean).join(' · '))),
+      h('td', { class: 'number' }, phone ? fmt.phone(phone) : '—', blocked && h('div', {}, badge('Do Not Call', 'missed')), c.stage && h('div', { class: 'row-gap' }, stageBadge(ctx, c.stage))),
+      lastCallCell(ctx, c, refresh),
+      nextStepCell(ctx, c, refresh),
+      h('td', { class: 'actions' }, h('div', { class: 'row end nowrap' },
+        phone && h('button', {
+          class: `btn small${c.zoom ? '' : ' secondary'}`,
+          type: 'button',
+          title: 'Record a call you made in Zoom: outcome, note and reminder',
+          onclick: () => logCallDialog(ctx, { contactId: c.id, listId: list.id, zoom: c.zoom, onDone: refresh }),
+        }, icon('note', 14), c.zoom ? 'Add note' : 'Log call'),
+        phone && h('button', {
+          class: 'btn small call',
+          type: 'button',
+          disabled: blocked,
+          onclick: () => startCall(ctx, { contactId: c.id, phone, listId: list.id, onDone: refresh }),
+        }, icon('phone', 14), 'Call'),
+        h('button', {
+          class: 'icon-btn',
+          type: 'button',
+          title: 'Remove from this list',
+          'aria-label': `Remove ${fmt.name(c)} from this list`,
+          onclick: (event) => busy(event.currentTarget, async () => {
+            await api(`/lists/${list.id}/remove`, { method: 'POST', body: { contactIds: [c.id] } });
+            toast('Removed from the list.');
+            await refresh();
+          }),
+        }, icon('x', 14)))));
+  }
+
+  function draw() {
+    subtitle.textContent = `${fmt.num(contacts.length)} leads · ${fmt.num(contacts.filter((c) => c.attempts).length)} with a logged call`;
+    fill(chips, LIST_VIEWS.map(([key, label, test]) => {
+      const count = contacts.filter(test).length;
+      if (key === 'note' && !count && state.view !== 'note') return null;
+      return h('button', {
+        class: `chip${state.view === key ? ' on' : ''}`,
+        type: 'button',
+        'aria-pressed': String(state.view === key),
+        onclick: () => {
+          state.view = key;
+          draw();
+        },
+      }, label, h('span', { class: 'count' }, fmt.num(count)));
+    }));
+    const test = LIST_VIEWS.find(([key]) => key === state.view)[2];
+    const shown = contacts.filter((c) => test(c) && matchesSearch(c, state.q));
+    fill(tableBox, contacts.length === 0
+      ? empty('This list is empty. Add leads from the Leads page.')
+      : shown.length === 0
+        ? empty('No leads match.')
+        : h('section', { class: 'card panel' }, h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+          h('thead', {}, h('tr', {}, h('th', {}, 'Lead'), h('th', {}, 'Phone'), h('th', {}, 'Last call and note'), h('th', {}, 'Next step'), h('th', {}))),
+          h('tbody', {}, shown.map(row))))));
+  }
 
   const rename = h('button', {
     class: 'btn ghost',
@@ -87,49 +204,35 @@ export async function renderList(root, { id }, ctx, isCurrent) {
   }, icon('trash'), 'Delete');
 
   root.replaceChildren(
-    pageHead(list.name, `${fmt.num(contacts.length)} leads · ${fmt.num(neverCalled)} never called`, [
+    pageHead(list.name, subtitle, [
       exportButton(`/lists/${list.id}/export`),
       rename,
       remove,
       h('a', { class: 'btn call', href: `#/dial/${list.id}` }, icon('play'), 'Start dialing'),
     ], ['Call lists', '#/lists']),
-    contacts.length
-      ? h('section', { class: 'card panel' }, h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-        h('thead', {}, h('tr', {}, h('th', { class: 'num' }, '#'), h('th', {}, 'Contact'), h('th', {}, 'Company'), h('th', {}, 'Phone'), h('th', {}, 'Stage'),
-          h('th', {}, 'Last outcome'), h('th', { class: 'num' }, 'Attempts'), h('th', {}, 'Last called'), h('th', {}))),
-        h('tbody', {}, contacts.map((c, i) => {
-          const phone = bestPhone(c, c);
-          const blocked = Boolean(c.do_not_call || c.company_dnc);
-          return h('tr', {},
-            h('td', { class: 'num muted' }, i + 1),
-            h('td', { class: 'title-cell' }, h('a', { href: `#/contact/${c.id}` }, fmt.name(c)), h('div', { class: 'sub' }, c.job_title || '')),
-            h('td', { class: 'title-cell' }, h('a', { href: `#/company/${c.company_id}` }, c.company_name), h('div', { class: 'sub' }, [c.city, c.state].filter(Boolean).join(', '))),
-            h('td', { class: 'number' }, phone ? fmt.phone(phone) : '—', blocked && h('div', {}, badge('Do Not Call', 'missed'))),
-            h('td', {}, c.stage && stageBadge(ctx, c.stage)),
-            h('td', {}, c.last_disposition ? outcomeBadge(ctx, c.last_disposition) : h('span', { class: 'muted' }, 'Never called')),
-            h('td', { class: 'num' }, c.attempts >= max ? badge(`${c.attempts}/${max}`, 'missed') : c.attempts),
-            h('td', { class: 'time' }, c.last_called_at ? fmt.ago(c.last_called_at) : '—'),
-            h('td', { class: 'actions' }, h('div', { class: 'row end nowrap' },
-              phone && h('button', {
-                class: 'btn small call',
-                type: 'button',
-                disabled: blocked,
-                onclick: () => startCall(ctx, { contactId: c.id, phone, listId: list.id, onDone: reload }),
-              }, icon('phone', 14), 'Call'),
-              h('button', {
-                class: 'icon-btn',
-                type: 'button',
-                title: 'Remove from this list',
-                'aria-label': `Remove ${fmt.name(c)} from this list`,
-                onclick: (event) => busy(event.currentTarget, async () => {
-                  await api(`/lists/${list.id}/remove`, { method: 'POST', body: { contactIds: [c.id] } });
-                  toast('Removed from the list.');
-                  reload();
-                }),
-              }, icon('x', 14)))));
-        })))))
-      : empty('This list is empty. Add leads from the Leads page.'),
+    h('div', { class: 'list-tools' },
+      h('div', { class: 'searchbar' }, icon('search'), h('input', {
+        type: 'search',
+        placeholder: 'Find a number, name or company in this list',
+        'aria-label': 'Find in this list',
+        oninput: (event) => {
+          state.q = event.target.value;
+          draw();
+        },
+      })),
+      chips),
+    tableBox,
   );
+  draw();
+
+  // Coming back from dialing in Zoom: fetch Zoom's latest calls, so the call just made shows up here.
+  const pullZoom = () => api('/zoom/sync', { method: 'POST' }).then(refresh).catch(() => {});
+  const onFocus = () => {
+    if (!isCurrent()) return window.removeEventListener('focus', onFocus);
+    pullZoom();
+  };
+  window.addEventListener('focus', onFocus);
+  pullZoom();
 }
 
 /** Goes through a list lead by lead: call, save the outcome, and the next lead loads automatically. */
@@ -175,8 +278,14 @@ export async function renderDialer(root, { id }, ctx, isCurrent) {
   }
 
   const skip = h('button', { class: 'btn secondary', type: 'button', onclick: () => busy(skip, advance) }, icon('skip'), 'Skip');
+  const logCall = h('button', {
+    class: 'btn secondary',
+    type: 'button',
+    title: 'Record a call you made in Zoom',
+    onclick: () => currentId && logCallDialog(ctx, { contactId: currentId, listId: list.id, onDone: () => advance() }),
+  }, icon('note'), 'Log call');
   root.replaceChildren(
-    pageHead(`Dialing · ${list.name}`, progress, [skip, h('a', { class: 'btn ghost', href: `#/list/${list.id}` }, 'End session')], ['Call lists', '#/lists']),
+    pageHead(`Dialing · ${list.name}`, progress, [logCall, skip, h('a', { class: 'btn ghost', href: `#/list/${list.id}` }, 'End session')], ['Call lists', '#/lists']),
     progressBar,
     view,
   );

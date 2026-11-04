@@ -1,6 +1,7 @@
 // Company and contact pages: lead panel with calling, contacts, call history, tasks, pipeline, details and history.
 import { startCall } from '../call.js';
 import { bestPhone, callTimeline, leadPanel, phonesOf, urlLinks } from '../lead.js';
+import { logCallDialog } from '../logcall.js';
 import { canEmail, emailButton, emailLink, threadRow } from '../mail.js';
 import {
   api, badge, busy, confirmDialog, field, fill, fmt, h, icon, localInput, outcomeBadge, pageHead, select, toast,
@@ -300,6 +301,7 @@ export async function renderContact(root, { id }, ctx, isCurrent) {
 
   root.replaceChildren(
     pageHead(fmt.name(contact), [contact.job_title, company.name].filter(Boolean).join(' · '), [
+      h('button', { class: 'btn secondary', type: 'button', title: 'Record a call you made in Zoom', onclick: () => logCallDialog(ctx, { contactId: contact.id, onDone: reload }) }, icon('note'), 'Log call'),
       dncButton(ctx, `/contacts/${contact.id}`, contact, reload),
       deleteButton(ctx, `/contacts/${contact.id}`, 'this contact', '#/leads?view=contacts'),
     ], ['Leads', '#/leads?view=contacts']),
@@ -360,6 +362,7 @@ export async function renderCompany(root, { id }, ctx, isCurrent) {
 
   root.replaceChildren(
     pageHead(company.name, [company.city, company.state].filter(Boolean).join(', ') || null, [
+      h('button', { class: 'btn secondary', type: 'button', title: 'Record a call you made in Zoom', onclick: () => logCallDialog(ctx, { companyId: company.id, onDone: reload }) }, icon('note'), 'Log call'),
       dncButton(ctx, `/companies/${company.id}`, company, reload),
       deleteButton(ctx, `/companies/${company.id}`, company.name, '#/leads?view=companies'),
     ], ['Leads', '#/leads?view=companies']),

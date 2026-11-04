@@ -5,8 +5,9 @@ import { sendWorkbook } from './excel.js';
 import { STAGES, TASK_TYPES } from './fields.js';
 import { contactQuery, stamp } from './leads.js';
 import { clean, cleanText, toE164 } from './phone.js';
-import { TASK_SELECT, invalidNumbers, visibleCompany, visibleContact } from './queries.js';
+import { TASK_SELECT, UNLOGGED_DAYS, invalidNumbers, visibleCompany, visibleContact } from './queries.js';
 import { HttpError, contactName } from './records.js';
+import { zoomCallFields } from './sync.js';
 import { todayBounds, zonedDateTime } from './time.js';
 
 const DAY_MS = 86_400_000;
@@ -14,6 +15,8 @@ const DAY_MS = 86_400_000;
 const PIPELINE = ['new', 'attempted', 'connected', 'interested', 'meeting_booked', 'demo_done', 'proposal_sent', 'won'];
 const TASK_TYPE_KEYS = new Set(TASK_TYPES.map(([key]) => key));
 const STAGE_LABELS = Object.fromEntries(STAGES);
+// Outcomes that end the calling, so a reminder to call again makes no sense.
+const NO_REMINDER = new Set(['lost', 'invalid_number', 'dnc']);
 
 export function dialUrl(scheme, e164) {
   if (scheme === 'tel') return `tel:${e164}`;
@@ -55,25 +58,42 @@ export function applyOutcome(store, user, call, input) {
   const notes = cleanText(input.notes);
   const meetingBooked = action === 'positive' && Boolean(input.meetingBooked);
 
+  // Times are entered in the lead's local time.
+  const zone = company.time_zone || store.setting('business_tz');
   let callbackAt = null;
   if (action === 'callback') {
-    // Entered in the lead's local time.
-    callbackAt = zonedDateTime(input.callbackAt, company.time_zone || store.setting('business_tz'));
+    callbackAt = zonedDateTime(input.callbackAt, zone);
     if (!callbackAt) throw new HttpError(400, 'Enter the date and time to call back.');
   }
+  // A reminder the person picked themselves replaces the automatic call task, and alerts them when it is due.
+  const remindAt = input.remindAt && action !== 'callback' && !NO_REMINDER.has(action) ? zonedDateTime(input.remindAt, zone) : null;
+  if (input.remindAt && action !== 'callback' && !NO_REMINDER.has(action) && !remindAt) throw new HttpError(400, 'Enter the date and time for the reminder.');
   const lostReason = action === 'lost' ? clean(input.lostReason) : null;
   if (action === 'lost' && !lostReason) throw new HttpError(400, 'Choose why the lead is lost.');
 
+  // A call recorded after a newer one (filled in later, say from the Zoom call log) is history: it is saved and counted,
+  // but the lead's latest outcome, open tasks and stage stay as the newer call left them.
+  const historic = Boolean(store.get(
+    'SELECT 1 FROM calls WHERE id != ? AND disposition IS NOT NULL AND started_at > ? AND company_id = ? AND contact_id IS ?',
+    call.id, call.started_at, company.id, contact?.id ?? null,
+  ));
+
   store.update('calls', call.id, { disposition: disposition.key, notes, meeting_booked: meetingBooked ? 1 : 0, outcome_at: time });
   if (contact) {
-    store.update('contacts', contact.id, { attempts: contact.attempts + 1, last_called_at: call.started_at, last_disposition: disposition.key, updated_at: time });
+    store.update('contacts', contact.id, {
+      attempts: contact.attempts + 1,
+      ...(historic ? {} : { last_called_at: call.started_at, last_disposition: disposition.key }),
+      updated_at: time,
+    });
   }
   // This call takes care of the lead's open call tasks; the outcome decides the next one.
-  store.run(
-    `UPDATE tasks SET status = 'done', completed_at = ?, call_id = coalesce(call_id, ?)
-     WHERE status = 'open' AND type = 'call' AND company_id = ? AND (contact_id IS ? OR contact_id IS NULL)`,
-    time, call.id, company.id, contact?.id ?? null,
-  );
+  if (!historic) {
+    store.run(
+      `UPDATE tasks SET status = 'done', completed_at = ?, call_id = coalesce(call_id, ?)
+       WHERE status = 'open' AND type = 'call' AND company_id = ? AND (contact_id IS ? OR contact_id IS NULL)`,
+      time, call.id, company.id, contact?.id ?? null,
+    );
+  }
 
   let task = null;
   const addTask = (fields) => {
@@ -91,11 +111,12 @@ export function applyOutcome(store, user, call, input) {
   };
   const inDays = (n) => new Date(Date.now() + n * DAY_MS).toISOString();
 
+  const automatic = !historic && !remindAt && !input.noFollowUp;
   let companyBlocked = false;
-  if (action === 'retry') addTask({ type: 'call', title: disposition.task_title || 'Retry call', due_at: inDays(disposition.retry_days ?? 1) });
+  if (action === 'retry' && automatic) addTask({ type: 'call', title: disposition.task_title || 'Retry call', due_at: inDays(disposition.retry_days ?? 1) });
   else if (action === 'callback') addTask({ type: 'call', title: disposition.task_title || 'Callback', due_at: callbackAt.toISOString(), is_callback: 1 });
-  else if (action === 'positive') addTask({ type: 'email', title: disposition.task_title || 'Book the meeting and send a follow-up email', due_at: time });
-  else if (action === 'nurture') addTask({ type: 'call', title: disposition.task_title || 'Nurture follow-up call', due_at: inDays(disposition.retry_days ?? 30) });
+  else if (action === 'positive' && !historic) addTask({ type: 'email', title: disposition.task_title || 'Book the meeting and send a follow-up email', due_at: time });
+  else if (action === 'nurture' && automatic) addTask({ type: 'call', title: disposition.task_title || 'Nurture follow-up call', due_at: inDays(disposition.retry_days ?? 30) });
   else if (action === 'invalid_number') {
     store.run('INSERT OR IGNORE INTO invalid_numbers (e164, flagged_by, flagged_at) VALUES (?, ?, ?)', call.phone_e164, user.id, time);
     store.log(user.id, 'number', null, 'flagged_invalid', { phone: call.phone_e164, company: company.name });
@@ -115,9 +136,11 @@ export function applyOutcome(store, user, call, input) {
     }
   }
 
+  if (remindAt) addTask({ type: 'call', title: (action !== 'positive' && disposition.task_title) || 'Call back', due_at: remindAt.toISOString(), is_callback: 1 });
+
   const deal = store.get('SELECT * FROM deals WHERE company_id = ?', company.id);
-  let stage = nextStage(deal.stage, disposition, meetingBooked);
-  let reason = action === 'lost' ? lostReason : deal.lost_reason;
+  let stage = historic ? deal.stage : nextStage(deal.stage, disposition, meetingBooked);
+  let reason = action === 'lost' && !historic ? lostReason : deal.lost_reason;
   if (companyBlocked && deal.stage !== 'won') {
     stage = 'lost';
     reason = 'Do not call';
@@ -151,6 +174,56 @@ function listMembers(store, user, listId) {
     listId,
     ...(user.role === 'admin' ? [] : [user.id]),
   );
+}
+
+/** What a call list shows beside each lead: the latest note, the next follow-up, and a Zoom call nobody has recorded yet. */
+function withActivity(store, listId, members) {
+  const lastCall = new Map();
+  const lastNote = new Map();
+  const calls = store.all(
+    `SELECT lc.contact_id AS member, c.id, c.notes, c.started_at, c.user_id
+     FROM list_contacts lc
+     JOIN contacts ct ON ct.id = lc.contact_id
+     JOIN calls c ON c.contact_id = ct.id OR (c.contact_id IS NULL AND c.company_id = ct.company_id)
+     WHERE lc.list_id = ? AND c.disposition IS NOT NULL ORDER BY c.started_at`,
+    listId,
+  );
+  for (const { member, ...call } of calls) {
+    lastCall.set(member, call);
+    if (call.notes) lastNote.set(member, call);
+  }
+  // Soonest last, so the soonest open call task wins for each contact and company.
+  const tasks = new Map();
+  const open = store.all(
+    `SELECT t.id, t.title, t.due_at, t.is_callback, t.contact_id, t.company_id FROM tasks t
+     WHERE t.status = 'open' AND t.type = 'call'
+       AND t.company_id IN (SELECT ct.company_id FROM list_contacts lc JOIN contacts ct ON ct.id = lc.contact_id WHERE lc.list_id = ?)
+     ORDER BY t.due_at DESC`,
+    listId,
+  );
+  for (const task of open) tasks.set(task.contact_id ? `contact ${task.contact_id}` : `company ${task.company_id}`, task);
+  // Only calls newer than the lead's last recorded one: the rest stay in the Zoom call log.
+  const zoom = new Map();
+  const unlogged = store.all(
+    `SELECT lc.contact_id AS member, z.uuid, z.callee_number AS number, z.start_time, z.duration, z.result
+     FROM list_contacts lc
+     JOIN contacts ct ON ct.id = lc.contact_id
+     JOIN companies co ON co.id = ct.company_id
+     JOIN zoom_calls z ON z.direction = 'outbound' AND z.callee_number IN (ct.mobile_e164, ct.direct_e164, co.hq_phone_e164)
+     WHERE lc.list_id = ? AND z.start_time >= ? AND z.start_time > coalesce(ct.last_called_at, '')
+       AND NOT EXISTS (SELECT 1 FROM calls cl WHERE cl.zoom_uuid = z.uuid)
+     ORDER BY z.start_time`,
+    listId,
+    new Date(Date.now() - UNLOGGED_DAYS * DAY_MS).toISOString(),
+  );
+  for (const { member, ...call } of unlogged) zoom.set(member, call);
+  return members.map((m) => ({
+    ...m,
+    last_call: lastCall.get(m.id) ?? null,
+    last_note: lastNote.get(m.id) ?? null,
+    task: tasks.get(`contact ${m.id}`) ?? tasks.get(`company ${m.company_id}`) ?? null,
+    zoom: zoom.get(m.id) ?? null,
+  }));
 }
 
 function visibleList(store, id) {
@@ -212,7 +285,48 @@ export function callingRoutes(store) {
     res.json({ call: pendingCall(store, req.user.id), dialUrl: dialUrl(store.setting('dial_scheme'), e164) });
   });
 
+  // A call made outside the CRM (dialed by hand in Zoom), recorded afterwards. Unlike /calls/start nothing blocks it:
+  // the call already happened, so Do Not Call, a wrong-number flag or the attempt limit must not lose the record.
+  r.post('/calls/log', (req, res) => {
+    const { contactId, companyId, listId, zoomUuid } = req.body;
+    const contact = contactId ? visibleContact(store, req.user, contactId) : null;
+    const company = contact ? store.get('SELECT * FROM companies WHERE id = ?', contact.company_id) : visibleCompany(store, req.user, companyId);
+    const zoom = zoomUuid ? store.get('SELECT * FROM zoom_calls WHERE uuid = ?', String(zoomUuid)) : null;
+    if (zoomUuid && !zoom) throw new HttpError(404, 'That Zoom call was not found.');
+    if (zoom && store.get('SELECT 1 FROM calls WHERE zoom_uuid = ?', zoom.uuid)) throw new HttpError(409, 'That Zoom call has already been recorded.');
+    const e164 = zoom ? (zoom.direction === 'inbound' ? zoom.caller_number : zoom.callee_number) : toE164(req.body.phone);
+    if (!e164 || !contactPhones(contact, company).includes(e164)) throw new HttpError(400, "Pick one of this lead's phone numbers.");
+    const list = listId ? store.get('SELECT id FROM lists WHERE id = ?', Number(listId)) : null;
+    // A Zoom call belongs to whoever made it, even if someone else writes the note.
+    const dialer = zoom?.caller_email ? store.get('SELECT id FROM users WHERE lower(email) = lower(?) AND active = 1', zoom.caller_email) : null;
+    res.json(store.tx(() => {
+      const id = store.insert('calls', {
+        user_id: dialer?.id ?? req.user.id,
+        contact_id: contact?.id ?? null,
+        company_id: company.id,
+        list_id: list?.id ?? null,
+        phone_e164: e164,
+        started_at: zoom?.start_time || nowIso(),
+        ...(zoom ? zoomCallFields(zoom) : {}),
+      });
+      store.log(req.user.id, 'call', id, 'logged', { phone: e164, company: company.name, ...(contact && { contact: contactName(contact) }) });
+      const result = applyOutcome(store, req.user, store.get('SELECT * FROM calls WHERE id = ?', id), req.body);
+      return { ...result, call: store.get('SELECT id, notes, disposition, started_at, user_id FROM calls WHERE id = ?', id) };
+    }));
+  });
+
   r.get('/calls/:id', (req, res) => res.json({ call: ownCall(req) }));
+
+  // The note on a call, written or changed at any time.
+  r.patch('/calls/:id', (req, res) => {
+    const call = ownCall(req);
+    const notes = cleanText(req.body.notes);
+    store.tx(() => {
+      store.update('calls', call.id, { notes });
+      store.log(req.user.id, 'call', call.id, 'note_changed', { ...(notes && { notes: notes.slice(0, 300) }) });
+    });
+    res.json({ notes });
+  });
 
   r.post('/calls/:id/outcome', (req, res) => {
     const call = ownCall(req);
@@ -372,7 +486,7 @@ export function callingRoutes(store) {
 
   r.get('/lists/:id', (req, res) => {
     const list = visibleList(store, req.params.id);
-    res.json({ list, contacts: listMembers(store, req.user, list.id) });
+    res.json({ list, contacts: withActivity(store, list.id, listMembers(store, req.user, list.id)) });
   });
 
   r.patch('/lists/:id', (req, res) => {
@@ -452,9 +566,9 @@ export function callingRoutes(store) {
       columns: [
         ['position', '#', 6], ['contact', 'Contact', 24], ['job_title', 'Job title', 26], ['company_name', 'Company', 30],
         ['city', 'City'], ['state', 'State', 8], ['phone', 'Phone', 18], ['stage', 'Stage'], ['attempts', 'Attempts', 10],
-        ['last_called', 'Last called', 18], ['last_outcome', 'Last outcome', 24],
+        ['last_called', 'Last called', 18], ['last_outcome', 'Last outcome', 24], ['last_note', 'Last note', 48], ['next', 'Next follow-up', 18],
       ],
-      rows: listMembers(store, req.user, list.id).map((m, i) => ({
+      rows: withActivity(store, list.id, listMembers(store, req.user, list.id)).map((m, i) => ({
         ...m,
         position: i + 1,
         contact: [m.first_name, m.last_name].filter(Boolean).join(' '),
@@ -462,6 +576,8 @@ export function callingRoutes(store) {
         stage: STAGE_LABELS[m.stage] || m.stage,
         last_called: stamp(m.last_called_at, businessTz()),
         last_outcome: labels[m.last_disposition] || '',
+        last_note: m.last_note?.notes || '',
+        next: stamp(m.task?.due_at, businessTz()),
       })),
     }]);
   });

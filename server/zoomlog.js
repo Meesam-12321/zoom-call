@@ -2,7 +2,7 @@
 import express from 'express';
 import { asE164 } from './phone.js';
 import { buildReport, configuredMinSeconds } from './report.js';
-import { syncZoom } from './sync.js';
+import { saveZoomCalls, syncZoom } from './sync.js';
 import { isValidTimeZone, resolveRange } from './time.js';
 import * as zoomApi from './zoom.js';
 
@@ -22,10 +22,10 @@ function leadsByNumber(store, user, numbers) {
   );
   for (const c of contacts) {
     const name = `${[c.first_name, c.last_name].filter(Boolean).join(' ')} · ${c.company}`;
-    for (const number of [c.mobile_e164, c.direct_e164]) if (number && !leads.has(number)) leads.set(number, { href: `#/contact/${c.id}`, name });
+    for (const number of [c.mobile_e164, c.direct_e164]) if (number && !leads.has(number)) leads.set(number, { href: `#/contact/${c.id}`, name, contactId: c.id });
   }
   for (const co of store.all(`SELECT co.id, co.name, co.hq_phone_e164 FROM companies co WHERE co.hq_phone_e164 IN (${marks}) ${scope}`, ...list, ...owner)) {
-    if (!leads.has(co.hq_phone_e164)) leads.set(co.hq_phone_e164, { href: `#/company/${co.id}`, name: co.name });
+    if (!leads.has(co.hq_phone_e164)) leads.set(co.hq_phone_e164, { href: `#/company/${co.id}`, name: co.name, companyId: co.id });
   }
   return leads;
 }
@@ -40,11 +40,17 @@ export function zoomLogRoutes(store, zoom = zoomApi) {
 
     // The Dashboard reads the same records and works its numbers out with the same buildReport, so the two always agree.
     const entry = await zoom.callHistory(range, { refresh: req.query.refresh === '1' });
+    // Keep every call shown here, so any of them can take a note (the background sync only goes back a week).
+    store.tx(() => saveZoomCalls(store, entry.items));
     const report = buildReport(entry.items, range, { minConnectedSeconds: configuredMinSeconds() });
     const leads = leadsByNumber(store, req.user, report.calls.map((call) => call.number));
+    const recorded = new Map(store.all('SELECT id, zoom_uuid, notes, disposition, user_id FROM calls WHERE zoom_uuid IS NOT NULL').map((c) => [c.zoom_uuid, c]));
     res.json({
       ...report,
-      calls: report.calls.map((call) => ({ ...call, lead: leads.get(asE164(call.number)) || null })),
+      calls: report.calls.map((call) => {
+        const lead = leads.get(asE164(call.number)) || null;
+        return { ...call, lead, recorded: lead ? recorded.get(call.id) || null : null };
+      }),
       fetchedAt: new Date(entry.at).toISOString(),
       beforeZoomHistory: range.from.getTime() < Date.now() - zoomApi.HISTORY_DAYS * 86_400_000,
     });

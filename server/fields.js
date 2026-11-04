@@ -94,6 +94,7 @@ export const DISPOSITION_ACTIONS = [
   ['lost', 'Mark lost and ask for the reason'],
   ['invalid_number', 'Flag the number as invalid'],
   ['dnc', 'Set Do Not Call and block dialing'],
+  ['none', 'Nothing automatic'],
 ];
 
 // From the requirements: outcome → counts as connected → default next action.
@@ -101,6 +102,7 @@ export const DEFAULT_DISPOSITIONS = [
   { key: 'no_answer', label: 'No answer', connected: 0, action: 'retry', retry_days: 1, task_title: 'Retry call' },
   { key: 'voicemail', label: 'Voicemail left', connected: 0, action: 'retry', retry_days: 2, task_title: 'Retry call' },
   { key: 'gatekeeper', label: 'Gatekeeper', connected: 1, action: 'retry', retry_days: 2, task_title: 'Retry call and ask for the decision maker' },
+  { key: 'conversation', label: 'Had a conversation', connected: 1, action: 'none' },
   { key: 'callback', label: 'Call back later', connected: 1, action: 'callback', task_title: 'Callback' },
   { key: 'positive', label: 'Positive (meeting or inquiry)', connected: 1, action: 'positive', task_title: 'Book the meeting and send a follow-up email' },
   { key: 'prospect', label: 'Prospect (future interest or referral)', connected: 1, action: 'nurture', retry_days: 30, task_title: 'Nurture follow-up call' },

@@ -1,6 +1,7 @@
 // Placing a call (Zoom click-to-call) and the mandatory outcome dialog that follows it.
 import { leadPanel } from './lead.js';
-import { api, busy, confirmDialog, field, fmt, h, icon, localInput, openModal, select, toast } from './ui.js';
+import { askToNotify, callForm, savedMessage } from './logcall.js';
+import { api, busy, confirmDialog, fmt, h, icon, openModal, toast } from './ui.js';
 
 let outcomeOpen = false;
 
@@ -38,27 +39,6 @@ export async function startCall(ctx, { contactId, companyId, phone, listId, onDo
   return showOutcome(ctx, result.call, { onDone });
 }
 
-function actionText(d) {
-  const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
-  const next = {
-    retry: `retry in ${days(d.retry_days ?? 1)}`,
-    callback: 'callback at a set time',
-    positive: 'follow-up, stage Interested',
-    nurture: `Nurture, follow up in ${days(d.retry_days ?? 30)}`,
-    lost: 'mark the lead lost',
-    invalid_number: 'flag the number as wrong',
-    dnc: 'block dialing for good',
-  }[d.action];
-  return `${d.connected ? 'Connected' : 'Not connected'}${next ? ` · ${next}` : ''}`;
-}
-
-function savedMessage(disposition, result) {
-  const parts = [`Saved: ${disposition.label}.`];
-  if (result.stage.from !== result.stage.to) parts.push(`Stage: ${result.stage.label}.`);
-  if (result.task) parts.push(`Next: ${result.task.title}, ${fmt.dateTime(result.task.due_at)}.`);
-  return parts.join(' ');
-}
-
 /** The outcome dialog. It cannot be closed until an outcome is saved (or the call is discarded). */
 export async function showOutcome(ctx, call, { onDone } = {}) {
   if (outcomeOpen) return;
@@ -73,29 +53,7 @@ export async function showOutcome(ctx, call, { onDone } = {}) {
   }
 
   const tz = detail.company.time_zone || ctx.meta.settings.business_tz;
-  const notes = h('textarea', { rows: 4, placeholder: 'What happened? Who you spoke to, objections, next steps…' });
-  const callbackAt = h('input', { type: 'datetime-local', min: localInput(new Date(), tz) });
-  const meeting = h('input', { type: 'checkbox' });
-  const lostReason = select([['', 'Choose a reason…'], ...ctx.meta.lostReasons.map((r) => [r, r])], '');
-  const extra = h('div', { class: 'outcome-extra' });
-  let chosen = null;
-
-  const choose = (d) => {
-    chosen = d;
-    extra.replaceChildren(...[
-      d.action === 'callback' && field(`Call back at (their local time, ${fmt.zoneName(tz)})`, callbackAt),
-      d.action === 'positive' && h('label', { class: 'check' }, meeting, 'A meeting is booked'),
-      d.action === 'lost' && field('Why is the lead lost?', lostReason),
-      d.action === 'dnc' && h('p', { class: 'note' }, 'This lead will be blocked from dialing for good. Only an admin can undo it.'),
-    ].filter(Boolean));
-    extra.querySelector('input, select')?.focus();
-  };
-
-  const options = h('div', { class: 'outcomes', role: 'radiogroup', 'aria-label': 'Call outcome' },
-    ctx.meta.dispositions.filter((d) => d.active).map((d) => h('label', { class: 'outcome' },
-      h('input', { type: 'radio', name: 'outcome', value: d.key, onchange: () => choose(d) }),
-      h('span', {}, d.label),
-      h('small', {}, actionText(d)))));
+  const form = callForm(ctx, tz);
 
   let modal;
   const finish = () => {
@@ -108,14 +66,11 @@ export async function showOutcome(ctx, call, { onDone } = {}) {
     class: 'btn',
     type: 'button',
     onclick: () => busy(save, async () => {
-      if (!chosen) throw new Error('Choose what happened on the call.');
-      const result = await api(`/calls/${call.id}/outcome`, {
-        method: 'POST',
-        body: { disposition: chosen.key, notes: notes.value, callbackAt: callbackAt.value, meetingBooked: meeting.checked, lostReason: lostReason.value },
-      });
+      const body = form.read();
+      const result = await api(`/calls/${call.id}/outcome`, { method: 'POST', body });
       finish();
-      toast(savedMessage(chosen, result), { kind: 'ok' });
-      if (chosen.action === 'callback' && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+      toast(savedMessage(form.chosen(), result), { kind: 'ok' });
+      askToNotify(body);
       onDone?.(result);
     }),
   }, icon('check'), 'Save outcome');
@@ -151,9 +106,7 @@ export async function showOutcome(ctx, call, { onDone } = {}) {
           h('button', { class: 'btn small secondary', type: 'button', onclick: () => dial(dialUrl(ctx, call.phone_e164)) }, 'Open Zoom again')),
         h('h2', {}, 'What happened?'),
         h('p', { class: 'muted small' }, 'Save the outcome to log the call. You cannot start another call until you do.'),
-        options,
-        extra,
-        h('div', { class: 'block' }, field('Notes', notes)))),
+        form.el)),
     footer: [discard, save],
   });
 }

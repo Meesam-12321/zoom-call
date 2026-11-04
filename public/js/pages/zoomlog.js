@@ -1,6 +1,8 @@
 // Zoom call log: every Zoom Phone call in a period, straight from Zoom (not only calls dialed from the CRM),
 // with daily totals and a chart. Calls to a CRM lead's number link to that lead.
-import { api, busy, callStats, field, fill, fmt, h, icon, pageHead, plural, reportTabs, select, stat, toast } from '../ui.js';
+import { canEditNote, noteDialog } from '../followup.js';
+import { logCallDialog } from '../logcall.js';
+import { api, busy, callStats, field, fill, fmt, h, icon, outcomeBadge, pageHead, plural, reportTabs, select, stat, toast } from '../ui.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DAY_MS = 86_400_000;
@@ -236,7 +238,7 @@ function draw(root, ctx, view, data, isCurrent) {
     h('div', { class: 'panel-head section-head' },
       h('h2', { class: 'section-title' }, 'Call log'),
       minConnectedSeconds > 0 && h('span', { class: 'muted' }, `Outgoing calls under ${minConnectedSeconds}s count as not connected: usually voicemail or a phone menu, which Zoom also marks connected.`)),
-    callLog(days, calls, singleDay, view.tz),
+    callLog(ctx, days, calls, singleDay, view.tz),
     tip);
 
   if (days.length < 2) return;
@@ -255,7 +257,7 @@ function draw(root, ctx, view, data, isCurrent) {
 
 // ---------- call log
 
-function callLog(days, calls, singleDay, tz) {
+function callLog(ctx, days, calls, singleDay, tz) {
   const byDay = new Map();
   for (const call of calls) {
     if (!byDay.has(call.day)) byDay.set(call.day, []);
@@ -269,8 +271,8 @@ function callLog(days, calls, singleDay, tz) {
       h('span', { class: 'muted' }, `${plural(d.calls, 'call')} · ${fmt.num(d.connected)} connected · ${fmt.span(d.talkTime)} talk time`)),
     h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
       h('thead', {}, h('tr', {},
-        h('th', {}, 'Time'), h('th', {}, 'Direction'), h('th', {}, 'Number'), showUser && h('th', {}, 'User'), h('th', {}, 'Result'), h('th', { class: 'num' }, 'Duration'))),
-      h('tbody', {}, byDay.get(d.day).map((call) => callRow(call, showUser, time)))))));
+        h('th', {}, 'Time'), h('th', {}, 'Direction'), h('th', {}, 'Number'), showUser && h('th', {}, 'User'), h('th', {}, 'Result'), h('th', { class: 'num' }, 'Duration'), h('th', {}, 'Outcome and note'))),
+      h('tbody', {}, byDay.get(d.day).map((call) => callRow(ctx, call, showUser, time)))))));
   return sections.length ? sections : h('div', { class: 'card empty-state' }, singleDay ? 'No calls on this day.' : 'No calls in this period.');
 }
 
@@ -281,7 +283,37 @@ function resultHint(call) {
   return call.tooShort ? `${rang}, then ended after ${call.duration}s: usually voicemail, a phone menu or a wrong number.` : `${rang}.`;
 }
 
-function callRow(call, showUser, time) {
+/** The note on a call to a lead: add one, or read and change the one saved. Calls to other numbers have no lead to hold a note. */
+function noteCell(ctx, call) {
+  const cell = h('td', { class: 'wrap last-call' });
+  const draw = () => {
+    const saved = call.recorded;
+    if (saved) {
+      fill(cell,
+        outcomeBadge(ctx, saved.disposition),
+        saved.notes && h('div', { class: 'note-line', title: saved.notes }, saved.notes),
+        saved.disposition && canEditNote(ctx, saved) && h('button', { class: 'link-btn', type: 'button', onclick: () => noteDialog(saved, draw) }, icon('note', 12), saved.notes ? 'Edit note' : 'Add note'));
+    } else if (call.lead) {
+      fill(cell, h('button', {
+        class: 'btn small secondary',
+        type: 'button',
+        onclick: () => logCallDialog(ctx, {
+          contactId: call.lead.contactId,
+          companyId: call.lead.companyId,
+          zoom: { uuid: call.id, number: call.number, start_time: call.start, duration: call.duration },
+          onDone: (result) => {
+            call.recorded = result.call;
+            draw();
+          },
+        }),
+      }, icon('note', 14), 'Add note'));
+    } else fill(cell, h('span', { class: 'muted', title: 'This number is not a lead in the CRM' }, '—'));
+  };
+  draw();
+  return cell;
+}
+
+function callRow(ctx, call, showUser, time) {
   const outbound = call.direction === 'outbound';
   return h('tr', {},
     h('td', { class: 'time' }, time.format(new Date(call.start))),
@@ -293,7 +325,8 @@ function callRow(call, showUser, time) {
         : call.name && h('div', { class: 'muted small' }, call.name)),
     showUser && h('td', {}, call.agent || '—'),
     h('td', {}, h('span', { class: `badge ${call.connected ? 'ok' : outbound ? 'warn' : 'missed'}`, title: resultHint(call) }, call.result)),
-    h('td', { class: `num${call.duration ? '' : ' muted'}` }, fmt.clock(call.duration)));
+    h('td', { class: `num${call.duration ? '' : ' muted'}` }, fmt.clock(call.duration)),
+    noteCell(ctx, call));
 }
 
 function scrollToDay(root, key) {

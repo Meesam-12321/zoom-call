@@ -110,7 +110,7 @@ export async function render(root, params, ctx, isCurrent) {
             h('span', { class: 'sync-icon on' }, icon('sheet')),
             h('div', {},
               h('strong', { title: sheet.name }, sheet.name),
-              h('div', { class: 'muted small' }, statuses[i] ? 'Changed since the last sync' : [sheet.syncedAt ? `Synced ${fmt.ago(sheet.syncedAt)}` : 'Not synced yet', sheet.summary].filter(Boolean).join(' · '))),
+              h('div', { class: 'muted small' }, statuses[i] ? 'Changed since the last sync' : [sheet.syncedAt ? `Synced ${fmt.ago(sheet.syncedAt).replace('Just now', 'just now')}` : 'Not synced yet', sheet.summary].filter(Boolean).join(' · '))),
             h('div', { class: 'row nowrap' },
               sync,
               h('button', {
@@ -184,17 +184,22 @@ export async function render(root, params, ctx, isCurrent) {
 
   function plan() {
     const count = (kind, choice) => report.duplicates.filter((d) => d.kind === kind && decisions[d.ref] === choice).length;
+    const creating = upload.options.values().createMissing;
     return {
-      newCompanies: report.companies.new + count('company', 'create'),
-      newContacts: report.contacts.new + count('contact', 'create'),
+      creating,
+      newCompanies: report.companies.new + count('company', 'create') + (creating ? missingCompanies() : 0),
+      newContacts: report.contacts.new + count('contact', 'create') - (creating ? 0 : report.contacts.unmatched),
       updates: count('company', 'merge') + count('contact', 'merge'),
       skips: count('company', 'skip') + count('contact', 'skip'),
     };
   }
 
+  /** Companies named by contact rows that exist neither in the sheet nor in the CRM. */
+  const missingCompanies = () => new Set(report.issues.filter((i) => i.kind === 'unmatched_company').map((i) => i.text)).size;
+
   const planLine = (p) => [
     p.newCompanies + p.newContacts ? `${fmt.num(p.newCompanies + p.newContacts)} new` : null,
-    p.updates ? `${fmt.num(p.updates)} to update` : null,
+    p.updates ? `${fmt.num(p.updates)} already in the CRM` : null,
     p.skips ? `${fmt.num(p.skips)} skipped` : null,
   ].filter(Boolean).join(' · ') || 'Nothing to change';
 
@@ -209,26 +214,29 @@ export async function render(root, params, ctx, isCurrent) {
   }
 
   function showReview() {
-    setHead(upload.filename, source?.remembered ? 'Here is what changed since the last sync. Nothing is saved until you confirm.' : 'Here is what will happen. Nothing is saved until you confirm.');
+    setHead(upload.filename, 'Here is what this sync will do. Nothing is saved until you confirm.');
     setStep(1);
     const c = report.companies;
     const p = report.contacts;
-    const issueKinds = Object.entries(report.issueCounts).filter(([, n]) => n);
     const statBox = h('section', { class: 'stats', 'aria-label': 'What will change' });
     const action = h('span', { class: 'muted' });
     const go = h('button', { class: 'btn large', type: 'button', onclick: () => busy(go, sync) });
     const drawPlan = () => {
       const now = plan();
+      // A company that is about to be created is not a problem any more.
+      const issueKinds = Object.entries(report.issueCounts).filter(([kind, n]) => n && !(now.creating && kind === 'unmatched_company'));
       fill(statBox,
-        stat('New companies', fmt.num(now.newCompanies), `of ${fmt.num(c.total)} in the sheet`),
+        stat('New companies', fmt.num(now.newCompanies), c.total ? `of ${fmt.num(c.total)} in the sheet` : now.creating ? 'Created from the contact rows' : 'None in this sheet'),
         stat('New contacts', fmt.num(now.newContacts), `of ${fmt.num(p.total)} in the sheet`),
-        stat('To update', fmt.num(now.updates), 'Empty fields get filled in'),
-        stat('Problems', fmt.num(report.issues.length), issueKinds.length ? issueKinds.map(([k, n]) => `${n} ${(ISSUE_LABELS[k] || k).toLowerCase()}`).join(' · ') : 'None found'));
+        stat('Already in the CRM', fmt.num(now.updates), 'Only their empty fields get filled in'),
+        stat('Problems', fmt.num(issueKinds.reduce((sum, [, n]) => sum + n, 0)), issueKinds.length ? issueKinds.map(([k, n]) => `${n} ${(ISSUE_LABELS[k] || k).toLowerCase()}`).join(' · ') : 'None found'));
       action.textContent = planLine(now);
       go.replaceChildren('Sync to CRM', h('span', { class: 'arrow' }, icon('arrow')));
     };
 
-    const options = optionsCard(p);
+    upload.options ??= optionsCard();
+    const options = upload.options;
+    options.refresh(missingCompanies(), drawPlan);
     fill(body,
       statBox,
       report.mergedRows > 0 && h('div', { class: 'note' }, `${counted(report.mergedRows, 'row', 'rows')} repeated a company or contact in the file and were combined.`),
@@ -243,23 +251,27 @@ export async function render(root, params, ctx, isCurrent) {
 
     async function sync() {
       const choice = options.values();
-      // The server starts a new list on every import. To keep adding to an existing list, the import fills a temporary
-      // list that is then moved across, because a contact can only be added to an existing list by id.
+      // The server starts a new list on every import. To keep adding to an existing list, the import fills a new list
+      // that is then moved across and deleted. Everyone in the sheet ends up on the list, whether new or already known.
       const intoExisting = /^\d+$/.test(choice.list);
-      const listName = intoExisting ? `Sync ${Date.now()}` : choice.list === 'new' ? choice.listName : '';
+      const listName = intoExisting ? `${stem(upload.filename)} – ${today()}` : choice.list === 'new' ? choice.listName : '';
       const result = await api('/import/commit', {
         method: 'POST',
         body: { token: upload.token, config, decisions, ownerId: choice.owner, listName, createMissingCompanies: choice.createMissing },
       });
       if (intoExisting && result.list) {
-        const { contacts } = await api(`/lists/${result.list.id}`);
-        const target = Number(choice.list);
-        const { added } = await api(`/lists/${target}/add`, { method: 'POST', body: { contactIds: contacts.map((contact) => contact.id) } });
-        await api(`/lists/${result.list.id}`, { method: 'DELETE' });
-        result.list = { id: target, name: options.listLabel(), added };
+        try {
+          const { contacts } = await api(`/lists/${result.list.id}`);
+          const target = Number(choice.list);
+          const { added } = await api(`/lists/${target}/add`, { method: 'POST', body: { contactIds: contacts.map((contact) => contact.id) } });
+          await api(`/lists/${result.list.id}`, { method: 'DELETE' });
+          result.list = { id: target, name: options.listLabel(), added };
+        } catch {
+          toast(`The leads are synced, but could not be added to that list. They are in "${result.list.name}" instead.`, { kind: 'warn', timeout: 0 });
+        }
       }
-      await ctx.refreshMeta();
-      const summary = [`${fmt.num(result.companies.created + result.contacts.created)} new`, `${fmt.num(result.companies.merged + result.contacts.merged)} updated`].join(', ');
+      await ctx.refreshMeta().catch(() => {});
+      const summary = [`${fmt.num(result.companies.created + result.contacts.created)} new`, `${fmt.num(result.companies.merged + result.contacts.merged)} merged`].join(', ');
       if (source?.handle) {
         await saveSheet({
           name: upload.filename,
@@ -275,7 +287,7 @@ export async function render(root, params, ctx, isCurrent) {
     }
   }
 
-  function optionsCard(contactsReport) {
+  function optionsCard() {
     const callers = ctx.meta.users.filter((u) => u.active);
     const owner = select([['', 'Nobody yet'], ...callers.map((u) => [String(u.id), `${u.name}${u.role === 'caller' ? ' (caller)' : ''}`])], String(callers.find((u) => u.role === 'caller')?.id ?? ''));
     const listName = h('input', { type: 'text', value: `${stem(upload.filename)} – ${today()}`, 'aria-label': 'New call list name' });
@@ -296,6 +308,8 @@ export async function render(root, params, ctx, isCurrent) {
     }).catch(() => {});
     // A file with only contact rows has no company sheet, so its companies have to come from those rows.
     const createMissing = h('input', { type: 'checkbox', checked: !Object.values(config.sheets).some((s) => s.type === 'companies') });
+    const missingLabel = h('span');
+    const missingRow = h('label', { class: 'check wide', hidden: true }, createMissing, missingLabel);
     return {
       card: h('section', { class: 'card panel' },
         h('div', { class: 'panel-head' }, h('h2', {}, 'Where the leads go')),
@@ -303,7 +317,12 @@ export async function render(root, params, ctx, isCurrent) {
           field('Give new leads to', owner, 'Callers only see the leads assigned to them.'),
           field('Call list', listChoice, 'So they are ready to dial straight away.'),
           nameField,
-          contactsReport.unmatched > 0 && h('label', { class: 'check wide' }, createMissing, `Create the ${counted(contactsReport.unmatched, 'missing company', 'missing companies')} instead of skipping those contacts`))),
+          missingRow)),
+      refresh: (missing, onToggle) => {
+        missingRow.hidden = !missing;
+        missingLabel.textContent = `Create the ${counted(missing, 'missing company', 'missing companies')} instead of skipping those contacts`;
+        createMissing.onchange = onToggle;
+      },
       values: () => ({ owner: owner.value, list: listChoice.value, listName: listName.value, createMissing: createMissing.checked }),
       listLabel: () => listChoice.selectedOptions[0]?.textContent.replace(/^Add to: /, '') || '',
     };
@@ -379,7 +398,7 @@ export async function render(root, params, ctx, isCurrent) {
   }
 
   function duplicatesContent(onChange) {
-    const choices = [['merge', 'Update (fill empty fields)'], ['skip', 'Skip'], ['create', 'Create new']];
+    const choices = [['merge', 'Merge (fill empty fields)'], ['skip', 'Skip'], ['create', 'Create new']];
     const rows = report.duplicates.map((d) => [d, select(choices, decisions[d.ref], {
       'aria-label': `What to do with ${d.label}`,
       onchange: (event) => {
@@ -429,7 +448,7 @@ export async function render(root, params, ctx, isCurrent) {
       h('div', { class: 'done-numbers' },
         number(companies.created, 'new companies'),
         number(contacts.created, 'new contacts'),
-        number(companies.merged + contacts.merged, 'updated'),
+        number(companies.merged + contacts.merged, 'already in the CRM'),
         skipped > 0 && number(skipped, 'skipped')),
       contacts.unmatched > 0 && h('p', { class: 'muted' }, `${counted(contacts.unmatched, 'contact', 'contacts')} skipped because their company was not found.`),
       list && h('p', { class: 'muted' }, list.added !== undefined ? `${counted(list.added, 'new lead', 'new leads')} added to "${list.name}".` : `Call list "${list.name}" is ready.`),

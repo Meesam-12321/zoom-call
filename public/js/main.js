@@ -1,5 +1,6 @@
 // CRM entry point: sign-in, the app shell (top bar + page), search, hash routing, the pending-outcome banner and reminders.
 import { showOutcome } from './call.js';
+import { snoozeMenu } from './followup.js';
 import { openPalette } from './palette.js';
 import { renderAuth } from './pages/auth.js';
 import * as dashboard from './pages/dashboard.js';
@@ -192,7 +193,21 @@ function notify(task) {
   const who = [task.first_name, task.last_name].filter(Boolean).join(' ') || task.company_name;
   const text = `Callback at ${fmt.time(task.due_at)}: ${who}, ${task.company_name}`;
   const href = task.contact_id ? `#/contact/${task.contact_id}` : `#/company/${task.company_id}`;
-  toast(text, { kind: 'warn', timeout: 0, action: { label: 'Open', run: () => ctx.navigate(href) } });
+  toast(text, {
+    kind: 'warn',
+    timeout: 0,
+    actions: [
+      { label: 'Open', run: () => ctx.navigate(href) },
+      {
+        label: 'Snooze',
+        keepOpen: true,
+        run: (button, el) => snoozeMenu(ctx, button, task, () => {
+          el.remove();
+          if (/^#\/(today|list\/)/.test(location.hash)) ctx.rerender();
+        }),
+      },
+    ],
+  });
   if ('Notification' in window && Notification.permission === 'granted') {
     const note = new Notification('Callback due', { body: text });
     note.onclick = () => {

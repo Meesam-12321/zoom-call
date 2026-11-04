@@ -66,6 +66,7 @@ const ICONS = {
   chevron: ['m6 9 6 6 6-6'],
   sheet: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M8 13h2', 'M14 13h2', 'M8 17h2', 'M14 17h2'],
   filter: ['M3 6h18', 'M7 12h10', 'M10 18h4'],
+  note: ['M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7', 'M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z'],
 };
 
 export function icon(name, size = 16) {
@@ -329,14 +330,64 @@ export function debounce(fn, ms = 300) {
 
 // ---------- toasts and dialogs
 
-export function toast(message, { kind = 'info', action, timeout = 6000 } = {}) {
+export function toast(message, { kind = 'info', action, actions = [], timeout = 6000 } = {}) {
   const el = h('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status' },
     h('span', {}, message),
-    action && h('button', { class: 'btn small secondary', type: 'button', onclick: () => { el.remove(); action.run(); } }, action.label),
+    [action, ...actions].filter(Boolean).map((a) => h('button', {
+      class: 'btn small secondary',
+      type: 'button',
+      onclick: (event) => {
+        if (!a.keepOpen) el.remove();
+        a.run(event.currentTarget, el);
+      },
+    }, a.label)),
     h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Dismiss', onclick: () => el.remove() }, icon('x', 14)));
   document.getElementById('toasts').append(el);
   if (timeout) setTimeout(() => el.remove(), timeout);
   return el;
+}
+
+let closeMenu = null;
+let menuAnchor = null;
+
+/** A small menu beside a button, on top of everything so a scrolling table can't cut it off. items = [[label, run], ...]. */
+export function openMenu(anchor, items) {
+  const again = anchor === menuAnchor;
+  closeMenu?.();
+  if (again) return;
+  const menu = h('div', { class: 'popover menu-pop', role: 'menu' }, items.map(([label, run]) => h('button', {
+    class: 'popover-item',
+    type: 'button',
+    role: 'menuitem',
+    onclick: () => {
+      closeMenu();
+      run();
+    },
+  }, label)));
+  const outside = (event) => {
+    if (!menu.contains(event.target) && !anchor.contains(event.target)) closeMenu();
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape') closeMenu();
+  };
+  const onScroll = () => closeMenu();
+  closeMenu = () => {
+    menu.remove();
+    document.removeEventListener('mousedown', outside, true);
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('scroll', onScroll, true);
+    closeMenu = null;
+    menuAnchor = null;
+  };
+  menuAnchor = anchor;
+  document.body.append(menu);
+  const box = anchor.getBoundingClientRect();
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(box.right - width, innerWidth - width - 8))}px`;
+  menu.style.top = `${box.bottom + height + 8 > innerHeight ? Math.max(8, box.top - height - 8) : box.bottom + 8}px`;
+  document.addEventListener('mousedown', outside, true);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('scroll', onScroll, true);
 }
 
 /** A dialog. Not dismissable = no close button, Esc or backdrop click (used for mandatory call outcomes). */

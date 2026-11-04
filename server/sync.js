@@ -6,6 +6,20 @@ import { fetchCallHistory } from './zoom.js';
 const MINUTE = 60_000;
 const iso = (value) => (value && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null);
 
+/** The columns of a CRM call that come from its Zoom record. */
+export function zoomCallFields(zoom) {
+  const answered = Date.parse(zoom.answer_time);
+  return {
+    zoom_uuid: zoom.uuid,
+    zoom_result: zoom.result,
+    answered: ANSWERED.has(zoom.result) ? 1 : 0,
+    duration: zoom.duration,
+    ring_time: Number.isNaN(answered) ? null : Math.round((answered - Date.parse(zoom.start_time)) / 1000),
+    ended_at: zoom.end_time,
+    recording_status: zoom.recording_status,
+  };
+}
+
 export function saveZoomCalls(store, items) {
   for (const item of items) {
     const uuid = item.call_history_uuid || item.id;
@@ -25,35 +39,28 @@ export function saveZoomCalls(store, items) {
 /**
  * Links CRM calls from the last 3 days to the nearest unclaimed outbound Zoom call to the same number that started
  * between a minute before the CRM call and 10 minutes after it, but before the next CRM call to that number.
+ * A call recorded by hand is saved after it happened, so for those the Zoom record can be up to two hours older.
  */
 export function linkZoomCalls(store) {
   const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
   let linked = 0;
-  for (const call of store.all('SELECT id, phone_e164, started_at FROM calls WHERE zoom_uuid IS NULL AND started_at >= ? ORDER BY started_at', since)) {
+  for (const call of store.all('SELECT id, phone_e164, started_at, outcome_at FROM calls WHERE zoom_uuid IS NULL AND started_at >= ? ORDER BY started_at', since)) {
     const started = Date.parse(call.started_at);
     const nextCall = store.get('SELECT MIN(started_at) AS at FROM calls WHERE phone_e164 = ? AND started_at > ?', call.phone_e164, call.started_at).at;
     const latest = Math.min(started + 10 * MINUTE, nextCall ? Date.parse(nextCall) - 1 : Infinity);
+    const byHand = call.outcome_at && Date.parse(call.outcome_at) - started < 5000;
     const zoom = store.get(
       `SELECT * FROM zoom_calls z
        WHERE z.direction = 'outbound' AND z.callee_number = ? AND z.start_time BETWEEN ? AND ?
          AND NOT EXISTS (SELECT 1 FROM calls c WHERE c.zoom_uuid = z.uuid)
        ORDER BY abs(julianday(z.start_time) - julianday(?)) LIMIT 1`,
       call.phone_e164,
-      new Date(started - MINUTE).toISOString(),
+      new Date(started - (byHand ? 120 : 1) * MINUTE).toISOString(),
       new Date(latest).toISOString(),
       call.started_at,
     );
     if (!zoom) continue;
-    const answered = Date.parse(zoom.answer_time);
-    store.update('calls', call.id, {
-      zoom_uuid: zoom.uuid,
-      zoom_result: zoom.result,
-      answered: ANSWERED.has(zoom.result) ? 1 : 0,
-      duration: zoom.duration,
-      ring_time: Number.isNaN(answered) ? null : Math.round((answered - Date.parse(zoom.start_time)) / 1000),
-      ended_at: zoom.end_time,
-      recording_status: zoom.recording_status,
-    });
+    store.update('calls', call.id, zoomCallFields(zoom));
     linked++;
   }
   return linked;

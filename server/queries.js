@@ -43,6 +43,23 @@ export function activityFor(store, pairs) {
   ).map((row) => ({ ...row, details: row.details ? JSON.parse(row.details) : null }));
 }
 
+/** How far back a call dialed by hand in Zoom is still offered for a note. Older ones stay reachable from the Zoom call log. */
+export const UNLOGGED_DAYS = 14;
+
+/** Recent calls to these numbers in Zoom's history that no CRM call has claimed: dialed by hand, with no note yet. */
+export function unloggedZoomCalls(store, numbers) {
+  const list = [...new Set(numbers.filter(Boolean))];
+  if (!list.length) return [];
+  return store.all(
+    `SELECT z.uuid, z.callee_number AS number, z.start_time, z.duration, z.result FROM zoom_calls z
+     WHERE z.direction = 'outbound' AND z.start_time >= ? AND z.callee_number IN (${list.map(() => '?').join(', ')})
+       AND NOT EXISTS (SELECT 1 FROM calls cl WHERE cl.zoom_uuid = z.uuid)
+     ORDER BY z.start_time DESC LIMIT 10`,
+    new Date(Date.now() - UNLOGGED_DAYS * 86_400_000).toISOString(),
+    ...list,
+  );
+}
+
 export function invalidNumbers(store, numbers) {
   const list = numbers.filter(Boolean);
   if (!list.length) return [];
@@ -73,5 +90,6 @@ export function leadDetail(store, company, contact = null) {
       ? store.all('SELECT l.id, l.name FROM list_contacts lc JOIN lists l ON l.id = lc.list_id WHERE lc.contact_id = ? ORDER BY l.name', contact.id)
       : [],
     invalid: invalidNumbers(store, [contact?.mobile_e164, contact?.direct_e164, company.hq_phone_e164]),
+    zoomCalls: unloggedZoomCalls(store, [contact?.mobile_e164, contact?.direct_e164, company.hq_phone_e164]),
   };
 }

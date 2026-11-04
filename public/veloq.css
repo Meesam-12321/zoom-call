@@ -50,6 +50,7 @@
   --btn-bg: #0a0a0a;
   --btn-hover: #262626;
   --btn-fg: #fff;
+  --tab-active: #fff;
   --lime-soft: #eef8dc;
   --lime-line: #d6eeaa;
   --lime-ink: #3f6212;
@@ -87,6 +88,7 @@
   --btn-bg: #f6f6f1;
   --btn-hover: #fff;
   --btn-fg: #0a0a0a;
+  --tab-active: #2a2a2a;
   --lime-soft: #16200d;
   --lime-line: #2b3d17;
   --lime-ink: #bef264;
@@ -98,16 +100,23 @@
   --shadow-pop: 0 4px 8px rgb(0 0 0 / 0.3), 0 28px 56px -16px rgb(0 0 0 / 0.8);
 }
 
-/* The faint grid and lime glow from the Veloq site. */
+/* The faint grid and lime glow from the Veloq site, on its own fixed layer so scrolling never repaints it. */
 body {
+  background: var(--bg);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: '';
   background:
     radial-gradient(900px 480px at 6% -8%, var(--glow), transparent 65%),
     radial-gradient(760px 420px at 100% 2%, var(--glow-2), transparent 65%),
     linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    var(--bg);
-  background-attachment: fixed;
-  background-size: auto, auto, 80px 80px, 80px 80px, auto;
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: auto, auto, 80px 80px, 80px 80px;
 }
 
 a {
@@ -490,7 +499,7 @@ textarea:focus {
 
 .tab.active {
   color: var(--text);
-  background: var(--surface);
+  background: var(--tab-active);
   box-shadow: 0 1px 2px rgb(10 10 10 / 0.12);
 }
 
@@ -1168,6 +1177,10 @@ details.fold[open] > summary .chev {
 }
 
 /* ---------- responsive */
+.nav-cta .cta-icon {
+  display: none;
+}
+
 @media (max-width: 1240px) {
   .search-pill kbd,
   .search-pill span {
@@ -1228,10 +1241,6 @@ details.fold[open] > summary .chev {
 }
 
 @media (max-width: 640px) {
-  .brand-word {
-    display: none;
-  }
-
   .topnav {
     gap: 8px;
     padding: 0 8px 0 16px;
@@ -1260,9 +1269,6 @@ details.fold[open] > summary .chev {
   }
 }
 
-.nav-cta .cta-icon {
-  display: none;
-}
 
 @media (prefers-reduced-motion: reduce) {
   #page > *,
@@ -1292,7 +1298,7 @@ details.fold[open] > summary .chev {
   margin-bottom: 0;
 }
 
-.toolbar:has(> .tabs) {
+.toolbar:has(> .toolbar-end) {
   align-items: center;
 }
 
@@ -1303,4 +1309,124 @@ details.fold[open] > summary .chev {
 
 .section-gap-sm {
   margin-top: 8px;
+}
+
+/* ---------- recording calls */
+.list-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.list-tools .chips {
+  margin: 0;
+}
+
+.chip .count {
+  margin-left: 0;
+}
+
+.form-label {
+  margin-bottom: 8px;
+}
+
+.modal .chips {
+  margin-bottom: 8px;
+}
+
+.note-line {
+  display: -webkit-box;
+  max-width: 100%;
+  padding: 0;
+  margin-top: 4px;
+  overflow: hidden;
+  font: 400 14px/1.4 var(--font);
+  color: var(--text-2);
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  background: none;
+  border: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+button.note-line {
+  cursor: pointer;
+}
+
+button.note-line:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--lime);
+}
+
+.link-btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0;
+  margin-top: 4px;
+  font: 500 12px var(--font);
+  color: var(--muted);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.link-btn:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--lime);
+}
+
+.last-call {
+  min-width: 260px;
+}
+
+.last-call .row {
+  gap: 4px 8px;
+}
+
+.next-step {
+  white-space: nowrap;
+}
+
+.next-step .btn {
+  padding: 0;
+  margin-top: 4px;
+  height: auto;
+  color: var(--muted);
+}
+
+.next-step .btn:hover {
+  color: var(--text);
+  background: none;
+}
+
+.row-gap {
+  margin-top: 4px;
+  font-family: var(--font);
+}
+
+a.plain {
+  color: inherit;
+}
+
+.menu-pop {
+  position: fixed;
+  top: 0;
+  right: auto;
+  z-index: 70;
+  width: 208px;
+}
+
+.toast .btn {
+  flex: none;
+}
+
+.modal-body .stack > p:first-child {
+  margin: 0;
 }

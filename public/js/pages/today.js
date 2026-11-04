@@ -1,9 +1,10 @@
 // Today: what to do next (one big Call button), today's numbers, then overdue tasks, callbacks and tasks due today,
 // and leads never called, each one click away from a call.
 import { startCall } from '../call.js';
+import { snoozeButton } from '../followup.js';
 import { bestPhone } from '../lead.js';
 import { emailButton } from '../mail.js';
-import { api, callStats, fill, badge, busy, empty, exportButton, field, fmt, h, icon, localInput, openModal, pageHead, plural, select, stat, tabs } from '../ui.js';
+import { api, callStats, fill, badge, busy, empty, exportButton, fmt, h, icon, pageHead, plural, select, stat, tabs } from '../ui.js';
 
 export async function render(root, { query }, ctx, isCurrent) {
   const view = query.get('view') || 'today';
@@ -62,7 +63,7 @@ function hero(ctx, data) {
   return h('section', { class: 'hero' },
     h('div', { class: 'hero-copy' },
       h('span', { class: 'pill' }, fmt.date(new Date().toISOString())),
-      h('h1', { class: 'hero-title' }, `${greeting(ctx)}, ${first}.`, h('br'), headline ? [h('em', {}, headline), due ? ' due today.' : ' to call.'] : 'All caught up.'),
+      h('h1', { class: 'hero-title' }, `${greeting(ctx)}, ${first}.`, h('br'), headline ? [h('em', {}, headline), due ? ' waiting.' : ' to call.'] : 'All caught up.'),
       h('p', { class: 'hero-sub' }, `${fmt.num(data.overdue.length)} overdue · ${fmt.num(data.today.length)} due today · ${fmt.num(data.newLeadsTotal)} leads never called`),
       h('button', { class: 'btn large', type: 'button', onclick: () => ctx.startCalling() }, 'Start calling', h('span', { class: 'arrow' }, icon('arrow')))),
     upNext(ctx, data));
@@ -128,7 +129,7 @@ function taskRow(ctx, t, { onChange, showDate, showLead }) {
 
   const done = h('button', { class: 'btn small secondary', type: 'button', title: 'Mark done', onclick: (e) => update(e.currentTarget, { status: 'done' }) }, icon('check', 14), 'Done');
   const reopen = h('button', { class: 'btn small ghost', type: 'button', onclick: (e) => update(e.currentTarget, { status: 'open' }) }, 'Reopen');
-  const reschedule = h('button', { class: 'btn small ghost', type: 'button', onclick: () => rescheduleDialog(ctx, t, onChange) }, icon('clock', 14), 'Reschedule');
+  const snooze = snoozeButton(ctx, t, onChange);
   const call = t.type === 'call' && phone && !blocked && h('button', {
     class: 'btn small call',
     type: 'button',
@@ -145,25 +146,7 @@ function taskRow(ctx, t, { onChange, showDate, showLead }) {
       h('a', { href: hasContact ? `#/contact/${t.contact_id}` : `#/company/${t.company_id}` }, hasContact ? fmt.name(t) : t.company_name),
       h('div', { class: 'sub' }, [hasContact && t.company_name, phone && fmt.phone(phone), t.time_zone && fmt.localTime(t.time_zone)].filter(Boolean).join(' · '))),
     ctx.isAdmin && h('td', {}, t.user_name || '—'),
-    h('td', { class: 'actions' }, h('div', { class: 'row end' }, open ? [call, email, reschedule, done] : reopen)));
-}
-
-function rescheduleDialog(ctx, task, onChange) {
-  const input = h('input', { type: 'datetime-local', value: localInput(new Date(task.due_at)) });
-  const save = h('button', {
-    class: 'btn',
-    type: 'button',
-    onclick: () => busy(save, async () => {
-      await api(`/tasks/${task.id}`, { method: 'PATCH', body: { due: input.value } });
-      modal.close();
-      onChange();
-    }),
-  }, 'Save');
-  const modal = openModal({
-    title: 'Reschedule task',
-    body: [h('p', {}, task.title), field(`Due (${fmt.zoneName(ctx.meta.settings.business_tz)})`, input)],
-    footer: [h('button', { class: 'btn secondary', type: 'button', onclick: () => modal.close() }, 'Cancel'), save],
-  });
+    h('td', { class: 'actions' }, h('div', { class: 'row end' }, open ? [call, email, snooze, done] : reopen)));
 }
 
 function newLeadsTable(ctx, leads) {

@@ -10,8 +10,11 @@ This is the **MVP** phase of the requirements document (Nov 3, 2026).
 |---|---|
 | Leads | Companies and contacts with the HV template's own columns, names and order ("Company Information" and "Contact Information"), including Florida Region, Opening Hours, Owners / Key People, Evidence & Additional Notes and the research links. Search and filter by Florida Region, state, stage, last outcome, last called, priority, owner and Do Not Call. Export any list to Excel in the same sheet layout. |
 | Import | `.xlsx` or `.csv`, with a column-mapping screen. The HV template (Company Information + Contact Information sheets) imports with one click; other layouts can be saved as presets. Duplicates (same phone, email or company name) are listed so you can skip, merge or create each one. A validation report shows missing phones, invalid emails and unmatched company names, and "NA" counts as empty. There is also a command-line import (below). |
+| Sync | Sheets you import are remembered in Chrome, Edge or Opera (on localhost or HTTPS). **Sync now** reads the latest version of the file and shows what will change before anything is saved. New leads are added and existing leads only get their empty fields filled in. |
+| Navigation | **Ctrl+K** or **/** searches leads, pages and actions from anywhere. The sun/moon button switches between the light and dark themes. |
 | Calling | A **Call** button opens Zoom on the number. The outcome window opens straight away and cannot be closed until an outcome is saved, and the next call is blocked until then. The window shows the contact, their local time, the research note, the script, open tasks and past calls. Zoom's record of the call (duration, answered, Zoom call ID) is attached within about a minute. |
-| Outcomes | No answer, Voicemail left, Gatekeeper, Call back later, Positive, Prospect, Negative, Wrong number and Do not call, each with "counts as connected" and a next action. Admins can edit the list. |
+| Calls made by hand | Calls dialed straight in Zoom show on the call list as "Called in Zoom, no note". **Log call** records one with a one-click template, a note and a reminder, and can also be used from the dialer, lead pages and the Zoom call log. Reminders can be snoozed from the call list, the Today page or the reminder pop-up. |
+| Outcomes | No answer, Voicemail left, Gatekeeper, Had a conversation, Call back later, Positive, Prospect, Negative, Wrong number and Do not call, each with "counts as connected" and a next action. Admins can edit the list. |
 | Pipeline | New → Attempted → Connected → Interested → Meeting booked → Demo done → Proposal sent → Won / Lost, plus Nurture. Shown as a drag-and-drop board and a list. Outcomes move leads forward automatically, and moving a lead to Lost asks for the reason. |
 | Tasks | Created automatically from outcomes. The **Today** page lists overdue tasks, tasks and callbacks due today, and leads never called. Callbacks get a reminder 10 minutes before. Each lead has an attempt counter, with a warning after 8 attempts (configurable). |
 | Call lists | Group leads into campaigns, such as "Florida flooring – batch 1", and go through them with the dialer: call, save the outcome, and the next lead loads. |
@@ -90,7 +93,7 @@ Days and "today" use the business time zone (Settings → Calling rules, default
 
 ## The Zoom call log page
 
-**Zoom call log** in the sidebar lists every Zoom Phone call by day, straight from Zoom, including calls made outside the CRM. It shows totals, a calls-per-day chart and a daily summary for any day or range, and a call to a lead's number links to that lead. The old `/calls.html` address opens this page.
+**Zoom call log** (a tab inside **Reports**) lists every Zoom Phone call by day, straight from Zoom, including calls made outside the CRM. It shows totals, a calls-per-day chart and a daily summary for any day or range, and a call to a lead's number links to that lead. The old `/calls.html` address opens this page.
 
 Zoom can't tell a person from voicemail or a phone menu, so outgoing calls under 10 seconds count as "Not connected", on this page and on the Dashboard. Change this with `MIN_CONNECTED_SECONDS` in `.env`; `0` uses Zoom's result as is. The first card reads "Connected calls: 70 of 103", with the connection rate and the number not connected beneath it.
 
@@ -117,5 +120,5 @@ Zoom can't tell a person from voicemail or a phone menu, so outgoing calls under
 `npm run dev` restarts the server when code changes. `npm test` runs the tests.
 
 - `server/`: the Express API. `app.js` assembles it. `fields.js` lists the lead fields (the HV sheet's columns), `calling.js` handles calls, outcomes, tasks and lists, `leads.js` companies, contacts and the pipeline, `importer.js` Excel import, `sync.js` the Zoom sync, `zoomlog.js` the Zoom call log, `gmail.js` and `mail.js` email, and `analytics.js` the dashboard.
-- `public/`: the browser app (plain JavaScript modules, no build step). Each page is in `public/js/pages/`.
+- `public/`: the browser app (plain JavaScript modules, no build step). Each page is in `public/js/pages/`. `veloq.css` holds the Veloq brand tokens for the light and dark themes.
 - `scripts/import.js`: the command-line import.

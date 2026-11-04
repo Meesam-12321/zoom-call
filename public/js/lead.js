@@ -1,6 +1,7 @@
 // The lead panel: who the caller is talking to, their numbers, local time, research note, script and history.
+import { canEditNote, noteDialog } from './followup.js';
 import { canEmail, emailButton, emailLink } from './mail.js';
-import { badge, fmt, h, icon, outcomeBadge, stageBadge } from './ui.js';
+import { badge, fill, fmt, h, icon, outcomeBadge, stageBadge } from './ui.js';
 
 /** Callable numbers for a lead, best first (the contact's own lines, then the store / HQ line). */
 export function phonesOf(contact, company) {
@@ -70,7 +71,13 @@ function onTheLine(call) {
 }
 
 export function callTimeline(ctx, calls) {
-  return h('ul', { class: 'timeline' }, calls.map((c) => h('li', {},
+  return h('ul', { class: 'timeline' }, calls.map((c) => {
+    const note = h('div', {});
+    const drawNote = () => fill(note,
+      c.notes && h('p', {}, c.notes),
+      c.disposition && canEditNote(ctx, c) && h('button', { class: 'link-btn', type: 'button', onclick: () => noteDialog(c, drawNote) }, icon('note', 12), c.notes ? 'Edit note' : 'Add note'));
+    drawNote();
+    return h('li', {},
     h('div', { class: 'meta' },
       outcomeBadge(ctx, c.disposition),
       c.meeting_booked ? badge('Meeting booked', 'ok') : null,
@@ -80,7 +87,8 @@ export function callTimeline(ctx, calls) {
       h('span', {}, fmt.phone(c.phone_e164)),
       (c.first_name || c.last_name) && h('span', {}, fmt.name(c)),
       c.user_name && h('span', {}, c.user_name)),
-    c.notes && h('p', {}, c.notes))));
+    note);
+  }));
 }
 
 export function taskList(ctx, tasks) {
