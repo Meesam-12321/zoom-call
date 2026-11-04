@@ -51,7 +51,7 @@ let base;
 
 before(async () => {
   store = new Store(':memory:');
-  server = createApp(store, { setupCode: '123456' }).listen(0, '127.0.0.1');
+  server = createApp(store).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}/api`;
 });

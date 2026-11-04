@@ -29,7 +29,7 @@ npm install
 npm start
 ```
 
-1. Open http://localhost:4000 on this computer and create the **admin** account. No code is needed on this computer; from another device, use the setup code printed in the terminal.
+1. Open http://localhost:4000 on this computer and create the **admin** account.
 2. **Import**: upload the HV workbook, check the report and press **Import**. Keep the call-list name.
 3. **Settings → Users → Add user**: add the cold caller with the role **Caller** and their daily targets. Leave **Give this caller the leads nobody owns yet** ticked so they get the imported leads.
 4. The caller signs in, opens **Call lists → Start dialing**, and works through the list.
@@ -49,7 +49,7 @@ This uses the same mapping and checks as the Import page (the HV template is rec
 By default the server only listens on this computer (`127.0.0.1`). Pick one:
 
 - **Same office network:** add `HOST=0.0.0.0` to `.env` and restart. Allow Node.js through Windows Firewall when asked. The caller then opens `http://<this computer's IP>:4000`.
-- **Anywhere else (for example, a caller in another country):** run the app on a small cloud server behind HTTPS. Copy `.env` there and keep `data/` on a persistent disk.
+- **Anywhere else (for example, a caller in another country):** run the app on a small cloud server behind HTTPS. Copy `.env` there and keep `data/` on a persistent disk. Create the admin account as soon as it is up: while no account exists, whoever opens the page first can create it, and a disk that gets wiped puts it back in that state.
 
 Never expose it to the internet without HTTPS.
 

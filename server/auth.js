@@ -58,9 +58,6 @@ export function loadUser(store) {
 export const requireUser = (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Please sign in.' }));
 export const requireAdmin = (req, res, next) => (req.user?.role === 'admin' ? next() : res.status(403).json({ error: 'Only admins can do this.' }));
 
-// Requests from this computer itself (not through a proxy) may create the first admin without the setup code.
-const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) && !req.headers['x-forwarded-for'];
-
 // At most 10 failed sign-ins per address and email every 15 minutes.
 const failures = new Map();
 function tooManyFailures(key) {
@@ -73,19 +70,16 @@ function recordFailure(key) {
   else entry.count++;
 }
 
-export function authRoutes(store, { setupCode }) {
+export function authRoutes(store) {
   const router = express.Router();
   const hasUsers = () => Boolean(store.get('SELECT 1 FROM users LIMIT 1'));
 
   router.get('/state', (req, res) => {
-    res.json({ user: req.user || null, needsSetup: !hasUsers(), setupCodeRequired: !isLocal(req) });
+    res.json({ user: req.user || null, needsSetup: !hasUsers() });
   });
 
   router.post('/setup', (req, res) => {
     if (hasUsers()) throw new HttpError(409, 'The admin account already exists. Please sign in.');
-    if (!isLocal(req) && String(req.body.setupCode || '').trim() !== setupCode) {
-      throw new HttpError(403, 'That setup code is not right. It is printed in the terminal where the server runs.');
-    }
     const name = String(req.body.name || '').trim();
     const email = String(req.body.email || '').trim();
     if (!name || !/^\S+@\S+\.\S+$/.test(email)) throw new HttpError(400, 'Enter your name and a valid email address.');

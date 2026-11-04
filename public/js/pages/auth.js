@@ -8,7 +8,6 @@ export function renderAuth(state) {
     name: h('input', { type: 'text', autocomplete: 'name', required: true }),
     email: h('input', { type: 'email', autocomplete: 'username', required: true }),
     password: h('input', { type: 'password', autocomplete: setup ? 'new-password' : 'current-password', required: true, minlength: setup ? 8 : null }),
-    setupCode: h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code' }),
   };
   const submit = h('button', { class: 'btn', type: 'submit' }, setup ? 'Create admin account' : 'Sign in');
 
@@ -20,7 +19,7 @@ export function renderAuth(state) {
       error.hidden = true;
       try {
         if (setup) {
-          await api('/auth/setup', { method: 'POST', body: { name: inputs.name.value, email: inputs.email.value, password: inputs.password.value, setupCode: inputs.setupCode.value } });
+          await api('/auth/setup', { method: 'POST', body: { name: inputs.name.value, email: inputs.email.value, password: inputs.password.value } });
         } else {
           await api('/auth/login', { method: 'POST', body: { email: inputs.email.value, password: inputs.password.value } });
         }
@@ -39,7 +38,6 @@ export function renderAuth(state) {
   setup && field('Your name', inputs.name),
   field('Email', inputs.email),
   field('Password', inputs.password, setup ? 'At least 8 characters.' : null),
-  setup && state.setupCodeRequired && field('Setup code', inputs.setupCode, 'Shown in the terminal where the CRM server is running.'),
   submit);
 
   document.getElementById('app').replaceChildren(h('div', { class: 'auth-wrap' },

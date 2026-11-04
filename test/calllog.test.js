@@ -74,12 +74,12 @@ const zoomCall = (lead, uuid, start, extra = {}) => ({
 before(async () => {
   store = new Store(':memory:');
   const zoom = { configured: () => true, callHistory: async () => ({ items: zoomItems, at: Date.now() }) };
-  server = createApp(store, { setupCode: '123456', zoom }).listen(0, '127.0.0.1');
+  server = createApp(store, { zoom }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}/api`;
   admin = as();
   caller = as();
-  await admin('/auth/setup', { method: 'POST', body: { name: 'Admin', email: 'admin@example.com', password: 'admin-pass-1', setupCode: '123456' } });
+  await admin('/auth/setup', { method: 'POST', body: { name: 'Admin', email: 'admin@example.com', password: 'admin-pass-1' } });
   await admin('/users', { method: 'POST', body: { name: 'Sam', email: 'sam@example.com', password: 'caller-pass-1', role: 'caller' } });
   await caller('/auth/login', { method: 'POST', body: { email: 'sam@example.com', password: 'caller-pass-1' } });
 });

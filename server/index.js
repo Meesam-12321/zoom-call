@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createApp } from './app.js';
@@ -14,16 +13,14 @@ const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '127.0.0.1';
 
 const store = new Store(process.env.DB_FILE || path.join(root, 'data', 'crm.db'));
-// Needed only to create the first admin from another device; on this computer the setup page works without it.
-const setupCode = String(crypto.randomInt(100_000, 1_000_000));
-const app = createApp(store, { setupCode });
+const app = createApp(store);
 
 // Express 5 hands startup errors (e.g. port already in use) to this callback instead of throwing.
 app.listen(PORT, HOST, (error) => {
   if (error) throw error;
   console.log(`Cold-calling CRM → http://localhost:${PORT}`);
   if (!store.get('SELECT 1 FROM users LIMIT 1')) {
-    console.log(`First run: open the page to create the admin account (setup code for other devices: ${setupCode}).`);
+    console.log('First run: open the page to create the admin account. Until you do, anyone who can reach this server can create it.');
   }
   startZoomSync(store);
 });

@@ -31,7 +31,7 @@ const SECURITY_HEADERS = {
   ].join('; '),
 };
 
-export function createApp(store, { setupCode = null, mail = gmail, zoom = zoomApi } = {}) {
+export function createApp(store, { mail = gmail, zoom = zoomApi } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -47,7 +47,7 @@ export function createApp(store, { setupCode = null, mail = gmail, zoom = zoomAp
     if (req.method !== 'GET' && req.get('X-CRM') !== '1') return res.status(403).json({ error: 'Missing request header.' });
     next();
   });
-  app.use('/api/auth', authRoutes(store, { setupCode }));
+  app.use('/api/auth', authRoutes(store));
   app.use(
     '/api',
     requireUser,
