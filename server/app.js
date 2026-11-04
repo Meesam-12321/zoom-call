@@ -36,6 +36,8 @@ export function createApp(store, { setupCode = null } = {}) {
     res.set(SECURITY_HEADERS);
     next();
   });
+  // The Zoom call log used to be its own page; it now lives inside the CRM.
+  app.get('/calls.html', (req, res) => res.redirect(301, '/#/zoom'));
   app.use(express.static(publicDir));
 
   app.use('/api', express.json({ limit: '2mb' }), loadUser(store), (req, res, next) => {

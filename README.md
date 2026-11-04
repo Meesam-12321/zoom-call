@@ -8,8 +8,8 @@ This is the **MVP** phase of the requirements document (Nov 3, 2026).
 
 | Area | What you get |
 |---|---|
-| Leads | Companies and contacts with the HV template's fields. Search and filter by state, stage, last outcome, last called, priority, owner and Do Not Call. Export any list to Excel. |
-| Import | `.xlsx` or `.csv`, with a column-mapping screen. The HV template (Company Information + Contact Information sheets) imports with one click; other layouts can be saved as presets. Duplicates (same phone, email or company name) are listed so you can skip, merge or create each one. A validation report shows missing phones, invalid emails and unmatched company names, and "NA" counts as empty. |
+| Leads | Companies and contacts with the HV template's own columns, names and order ("Company Information" and "Contact Information"), including Florida Region, Opening Hours, Owners / Key People, Evidence & Additional Notes and the research links. Search and filter by Florida Region, state, stage, last outcome, last called, priority, owner and Do Not Call. Export any list to Excel in the same sheet layout. |
+| Import | `.xlsx` or `.csv`, with a column-mapping screen. The HV template (Company Information + Contact Information sheets) imports with one click; other layouts can be saved as presets. Duplicates (same phone, email or company name) are listed so you can skip, merge or create each one. A validation report shows missing phones, invalid emails and unmatched company names, and "NA" counts as empty. There is also a command-line import (below). |
 | Calling | A **Call** button opens Zoom on the number. The outcome window opens straight away and cannot be closed until an outcome is saved, and the next call is blocked until then. The window shows the contact, their local time, the research note, the script, open tasks and past calls. Zoom's record of the call (duration, answered, Zoom call ID) is attached within about a minute. |
 | Outcomes | No answer, Voicemail left, Gatekeeper, Call back later, Positive, Prospect, Negative, Wrong number and Do not call, each with "counts as connected" and a next action. Admins can edit the list. |
 | Pipeline | New → Attempted → Connected → Interested → Meeting booked → Demo done → Proposal sent → Won / Lost, plus Nurture. Shown as a drag-and-drop board and a list. Outcomes move leads forward automatically, and moving a lead to Lost asks for the reason. |
@@ -26,11 +26,19 @@ npm start
 ```
 
 1. Open http://localhost:4000 on this computer and create the **admin** account. No code is needed on this computer; from another device, use the setup code printed in the terminal.
-2. **Settings → Users → Add user**: add the cold caller with the role **Caller** and their daily targets.
-3. **Import**: upload the HV workbook, check the report and press **Import**. Assign the leads to the caller and keep the call-list name.
+2. **Import**: upload the HV workbook, check the report and press **Import**. Keep the call-list name.
+3. **Settings → Users → Add user**: add the cold caller with the role **Caller** and their daily targets. Leave **Give this caller the leads nobody owns yet** ticked so they get the imported leads.
 4. The caller signs in, opens **Call lists → Start dialing**, and works through the list.
 
 Callers see only the leads assigned to them. Admins see everything.
+
+### Importing from the command line
+
+```bash
+npm run import -- "path/to/workbook.xlsx" --list "Florida flooring – batch 1" [--owner caller@example.com]
+```
+
+This uses the same mapping and checks as the Import page (the HV template is recognised automatically) and prints what was created. Without `--owner` the leads stay unassigned until you give them to a caller. Importing the same file again creates nothing new: rows already in the CRM count as duplicates.
 
 ## Letting the caller in from another computer
 
@@ -63,9 +71,9 @@ Days and "today" use the business time zone (Settings → Calling rules, default
 
 ## The Zoom call log page
 
-The original call-log viewer is still under **Zoom call log** (`/calls.html`). It lists every Zoom Phone call by day, including calls made outside the CRM.
+**Zoom call log** in the sidebar lists every Zoom Phone call by day, straight from Zoom, including calls made outside the CRM. It shows totals, a calls-per-day chart and a daily summary for any day or range, and a call to a lead's number links to that lead. The old `/calls.html` address opens this page.
 
-On that page, Zoom can't tell a person from voicemail or a phone menu, so outgoing calls under 10 seconds count as "Not connected". Change this with `MIN_CONNECTED_SECONDS` in `.env`; `0` uses Zoom's result as is.
+On this page, Zoom can't tell a person from voicemail or a phone menu, so outgoing calls under 10 seconds count as "Not connected". Change this with `MIN_CONNECTED_SECONDS` in `.env`; `0` uses Zoom's result as is.
 
 ## Data, backups and security
 
@@ -88,5 +96,6 @@ On that page, Zoom can't tell a person from voicemail or a phone menu, so outgoi
 
 `npm run dev` restarts the server when code changes. `npm test` runs the tests.
 
-- `server/`: the Express API. `app.js` assembles it. `calling.js` handles calls, outcomes, tasks and lists, `leads.js` companies, contacts and the pipeline, `importer.js` Excel import, `sync.js` the Zoom sync, and `analytics.js` the dashboard.
-- `public/`: the browser app (plain JavaScript modules, no build step).
+- `server/`: the Express API. `app.js` assembles it. `fields.js` lists the lead fields (the HV sheet's columns), `calling.js` handles calls, outcomes, tasks and lists, `leads.js` companies, contacts and the pipeline, `importer.js` Excel import, `sync.js` the Zoom sync, `zoomlog.js` the Zoom call log, and `analytics.js` the dashboard.
+- `public/`: the browser app (plain JavaScript modules, no build step). Each page is in `public/js/pages/`.
+- `scripts/import.js`: the command-line import.

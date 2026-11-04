@@ -1,18 +1,22 @@
 // Leads: search and filter contacts or companies, call them, add them to call lists, assign owners, export to Excel.
 import { startCall } from '../call.js';
-import { bestPhone } from '../lead.js';
+import { bestPhone, fieldLabel } from '../lead.js';
 import {
   api, badge, busy, debounce, fill, empty, exportButton, field, fmt, h, icon, openModal, outcomeBadge, pageHead, select, stageBadge, tabs, toast,
 } from '../ui.js';
 
-const FILTERS = ['q', 'state', 'stage', 'disposition', 'lastCalled', 'priority', 'owner', 'dnc', 'sort'];
+const FILTERS = ['q', 'area', 'state', 'stage', 'disposition', 'lastCalled', 'priority', 'owner', 'dnc', 'sort'];
 const SORTS = {
   contacts: [['company', 'Company A–Z'], ['priority', 'Priority'], ['name', 'Name'], ['last_called', 'Recently called'], ['attempts', 'Most attempts'], ['newest', 'Newest']],
-  companies: [['name', 'Name A–Z'], ['priority', 'Priority'], ['city', 'City'], ['last_called', 'Recently called'], ['newest', 'Newest']],
+  companies: [['name', 'Name A–Z'], ['priority', 'Priority'], ['area', 'Florida Region'], ['city', 'City'], ['last_called', 'Recently called'], ['newest', 'Newest']],
 };
 
+// "City, ST · Florida Region"
+const placeLine = (row) => [[row.city, row.state].filter(Boolean).join(', '), row.area].filter(Boolean).join(' · ');
+
 export async function render(root, { query }, ctx, isCurrent) {
-  const state = { view: query.get('view') === 'companies' ? 'companies' : 'contacts', page: Number(query.get('page')) || 1 };
+  // Companies first: the import sheet is one row per company, and most leads are reached through the store's number.
+  const state = { view: query.get('view') === 'contacts' ? 'contacts' : 'companies', page: Number(query.get('page')) || 1 };
   for (const key of FILTERS) state[key] = query.get(key) || '';
   const selected = new Set();
   const tableBox = h('div', {});
@@ -68,7 +72,8 @@ export async function render(root, { query }, ctx, isCurrent) {
     state.page = 1;
     load();
   };
-  const search = h('input', { type: 'search', value: state.q, placeholder: 'Name, company, city, phone or email', oninput: debounce(set('q')) });
+  const search = h('input', { type: 'search', value: state.q, placeholder: 'Company, person, city, region, phone or email', oninput: debounce(set('q')) });
+  const areaLabel = fieldLabel(ctx.meta.companyFields, 'area');
   const states = [['', 'Any state'], ...Object.entries(ctx.meta.states).map(([code, name]) => [code, name])];
   const outcomes = [['', 'Any outcome'], ['none', 'Never called'], ...ctx.meta.dispositions.map((d) => [d.key, d.label])];
 
@@ -78,7 +83,7 @@ export async function render(root, { query }, ctx, isCurrent) {
       h('button', { class: 'btn secondary', type: 'button', onclick: () => newCompanyDialog(ctx) }, icon('plus'), 'New company'),
       h('button', { class: 'btn', type: 'button', onclick: () => newContactDialog(ctx) }, icon('plus'), 'New contact'),
     ]),
-    tabs([['contacts', 'Contacts'], ['companies', 'Companies']], state.view, (view) => {
+    tabs([['companies', 'Companies'], ['contacts', 'Contacts']], state.view, (view) => {
       state.view = view;
       state.page = 1;
       if (!SORTS[view].some(([key]) => key === state.sort)) state.sort = '';
@@ -86,6 +91,7 @@ export async function render(root, { query }, ctx, isCurrent) {
     }),
     h('div', { class: 'toolbar' },
       h('label', { class: 'field grow' }, h('span', {}, 'Search'), search),
+      ctx.meta.areas.length > 0 && field(areaLabel, select([['', 'Any'], ...ctx.meta.areas.map((area) => [area, area])], state.area, { onchange: set('area') })),
       field('State', select(states, state.state, { onchange: set('state') })),
       field('Stage', select([['', 'Any stage'], ...ctx.meta.stages], state.stage, { onchange: set('stage') })),
       field('Last outcome', select(outcomes, state.disposition, { onchange: set('disposition') })),
@@ -134,45 +140,46 @@ function callButton(ctx, { contactId, companyId, phone, blocked }) {
   }, icon('phone', 14), 'Call');
 }
 
+// The last outcome, with when it was (and for contacts, attempts so far) underneath.
+function lastOutcomeCell(ctx, row, attempts) {
+  if (!row.last_called_at) return h('td', {}, h('span', { class: 'muted' }, 'Never called'));
+  return h('td', {}, outcomeBadge(ctx, row.last_disposition), h('div', { class: 'sub' }, [fmt.ago(row.last_called_at), attempts].filter(Boolean).join(' · ')));
+}
+
+// Both tables keep to the columns a caller scans, so the Call button stays in view without scrolling sideways.
 function contactsTable(ctx, rows, selected, onSelect) {
   const max = ctx.meta.settings.max_attempts;
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
     h('thead', {}, h('tr', {},
       h('th', { class: 'check-col' }, selectAll(selected, rows, onSelect)), h('th', {}, 'Contact'), h('th', {}, 'Company'), h('th', {}, 'Phone'),
-      h('th', {}, 'Stage'), h('th', {}, 'Last outcome'), h('th', { class: 'num' }, 'Attempts'), h('th', {}, 'Last called'),
-      ctx.isAdmin && h('th', {}, 'Owner'), h('th', {}))),
+      h('th', {}, 'Last outcome'), ctx.isAdmin && h('th', {}, 'Owner'), h('th', {}))),
     h('tbody', {}, rows.map((c) => {
       const phone = bestPhone(c, c);
       const blocked = Boolean(c.do_not_call || c.company_dnc);
       return h('tr', {},
         h('td', {}, checkbox(selected, c.id, onSelect)),
         h('td', { class: 'title-cell' }, h('a', { href: `#/contact/${c.id}` }, fmt.name(c)), h('div', { class: 'sub' }, c.job_title || '')),
-        h('td', { class: 'title-cell' }, h('a', { href: `#/company/${c.company_id}` }, c.company_name), h('div', { class: 'sub' }, [c.city, c.state].filter(Boolean).join(', '))),
+        h('td', { class: 'title-cell' }, h('a', { href: `#/company/${c.company_id}` }, c.company_name), h('div', { class: 'sub' }, placeLine(c))),
         h('td', { class: 'number' }, phone ? fmt.phone(phone) : '—', blocked && h('div', {}, badge('Do Not Call', 'missed'))),
-        h('td', {}, c.stage && stageBadge(ctx, c.stage)),
-        h('td', {}, c.last_disposition ? outcomeBadge(ctx, c.last_disposition) : h('span', { class: 'muted' }, 'Never called')),
-        h('td', { class: 'num' }, c.attempts >= max ? badge(`${c.attempts}/${max}`, 'missed') : c.attempts),
-        h('td', { class: 'time' }, c.last_called_at ? fmt.ago(c.last_called_at) : '—'),
+        lastOutcomeCell(ctx, c, `${c.attempts} of ${max} attempts`),
         ctx.isAdmin && h('td', {}, c.owner_name || h('span', { class: 'muted' }, 'Unassigned')),
         h('td', { class: 'actions' }, callButton(ctx, { contactId: c.id, phone, blocked })));
     }))));
 }
 
 function companiesTable(ctx, rows, selected, onSelect) {
+  const label = (key) => fieldLabel(ctx.meta.companyFields, key);
   return h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
     h('thead', {}, h('tr', {},
-      h('th', { class: 'check-col' }, selectAll(selected, rows, onSelect)), h('th', {}, 'Company'), h('th', {}, 'HQ phone'), h('th', {}, 'Stage'),
-      h('th', {}, 'Priority'), h('th', { class: 'num' }, 'Contacts'), h('th', {}, 'Last outcome'), h('th', {}, 'Last called'),
-      ctx.isAdmin && h('th', {}, 'Owner'), h('th', {}))),
+      h('th', { class: 'check-col' }, selectAll(selected, rows, onSelect)), h('th', {}, label('name')), h('th', {}, label('hq_phone')),
+      h('th', {}, label('priority')), h('th', {}, 'Stage'), h('th', {}, 'Last outcome'), ctx.isAdmin && h('th', {}, 'Owner'), h('th', {}))),
     h('tbody', {}, rows.map((c) => h('tr', {},
       h('td', {}, checkbox(selected, c.id, onSelect)),
-      h('td', { class: 'title-cell' }, h('a', { href: `#/company/${c.id}` }, c.name), h('div', { class: 'sub' }, [c.city, c.state].filter(Boolean).join(', '))),
+      h('td', { class: 'title-cell' }, h('a', { href: `#/company/${c.id}` }, c.name), h('div', { class: 'sub' }, placeLine(c))),
       h('td', { class: 'number' }, c.hq_phone_e164 ? fmt.phone(c.hq_phone_e164) : '—', c.do_not_call ? h('div', {}, badge('Do Not Call', 'missed')) : null),
-      h('td', {}, c.stage && stageBadge(ctx, c.stage)),
       h('td', {}, c.priority || '—'),
-      h('td', { class: 'num' }, c.contact_count),
-      h('td', {}, c.last_disposition ? outcomeBadge(ctx, c.last_disposition) : h('span', { class: 'muted' }, 'Never called')),
-      h('td', { class: 'time' }, c.last_called_at ? fmt.ago(c.last_called_at) : '—'),
+      h('td', {}, c.stage && stageBadge(ctx, c.stage)),
+      lastOutcomeCell(ctx, c),
       ctx.isAdmin && h('td', {}, c.owner_name || h('span', { class: 'muted' }, 'Unassigned')),
       h('td', { class: 'actions' }, callButton(ctx, { companyId: c.id, phone: c.hq_phone_e164, blocked: Boolean(c.do_not_call) })))))));
 }

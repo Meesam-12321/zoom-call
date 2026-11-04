@@ -9,6 +9,7 @@ import * as pipeline from './pages/pipeline.js';
 import * as record from './pages/record.js';
 import * as settings from './pages/settings.js';
 import * as today from './pages/today.js';
+import * as zoomlog from './pages/zoomlog.js';
 import { api, fmt, h, icon, setZone, toast } from './ui.js';
 
 const ROUTES = {
@@ -22,18 +23,19 @@ const ROUTES = {
   dial: lists.renderDialer,
   dashboard: dashboard.render,
   import: importer.render,
+  zoom: zoomlog.render,
   settings: settings.render,
 };
 
-// [route, label, icon, href, admin only]
+// [route, label, icon, admin only]
 const NAV = [
   ['today', 'Today', 'today'],
   ['leads', 'Leads', 'leads'],
   ['pipeline', 'Pipeline', 'pipeline'],
   ['lists', 'Call lists', 'lists'],
   ['dashboard', 'Dashboard', 'dashboard'],
-  ['zoom', 'Zoom call log', 'zoom', '/calls.html'],
-  ['import', 'Import', 'import', null, true],
+  ['zoom', 'Zoom call log', 'zoom'],
+  ['import', 'Import', 'import', true],
   ['settings', 'Settings', 'settings'],
 ];
 const ACTIVE = { company: 'leads', contact: 'leads', list: 'lists', dial: 'lists' };
@@ -58,23 +60,27 @@ async function refreshMeta() {
 }
 
 function renderShell() {
-  const nav = NAV.filter(([, , , , adminOnly]) => !adminOnly || ctx.isAdmin).map(([key, label, iconName, href]) =>
-    h('a', { href: href || `#/${key}`, 'data-route': key }, icon(iconName, 18), label));
+  const nav = NAV.filter(([, , , adminOnly]) => !adminOnly || ctx.isAdmin).map(([key, label, iconName]) =>
+    h('a', { href: `#/${key}`, 'data-route': key }, icon(iconName, 16), label));
+  const initials = ctx.user.name.split(/\s+/).map((word) => word[0]).join('').slice(0, 2).toUpperCase();
   document.getElementById('app').replaceChildren(h('div', { class: 'shell' },
     h('aside', { class: 'sidebar' },
       h('div', { class: 'brand' }, h('span', { class: 'brand-mark' }, icon('phone', 16)), 'Cold-Calling CRM'),
       h('nav', { class: 'nav', 'aria-label': 'Main' }, nav),
       h('div', { class: 'sidebar-foot' },
-        h('div', {}, h('div', {}, ctx.user.name), h('div', { class: 'muted small' }, ctx.isAdmin ? 'Admin' : 'Caller')),
+        h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials),
+        h('div', { class: 'user-meta' }, h('div', { class: 'user-name', title: ctx.user.name }, ctx.user.name), h('div', { class: 'muted small' }, ctx.isAdmin ? 'Admin' : 'Caller')),
         h('button', {
-          class: 'btn ghost small',
+          class: 'icon-btn',
           type: 'button',
+          title: 'Sign out',
+          'aria-label': 'Sign out',
           onclick: async () => {
             await api('/auth/logout', { method: 'POST' }).catch(() => {});
             location.hash = '';
             location.reload();
           },
-        }, icon('logout', 14), 'Sign out'))),
+        }, icon('logout')))),
     h('main', { class: 'main' }, h('div', { id: 'pending', hidden: true }), h('div', { id: 'page' }))));
 }
 

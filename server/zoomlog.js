@@ -2,10 +2,39 @@
 import express from 'express';
 import { DEFAULT_MIN_CONNECTED_SECONDS, buildReport } from './report.js';
 import { syncZoom } from './sync.js';
+import { toE164 } from './phone.js';
 import { isValidTimeZone, resolveRange } from './time.js';
 import { HISTORY_DAYS, fetchCallHistory } from './zoom.js';
 
 const CACHE_MS = 60_000;
+
+// Zoom reports numbers as E.164 (+18135551234), which must match exactly: a misdial such as +162395667100 is not
+// the lead at +12395667100. Anything else (e.g. a number with spaces) is read the way the importer reads numbers.
+const e164 = (number) => (/^\+\d{8,15}$/.test(number || '') ? number : toE164(number));
+
+/** CRM leads (that the user can see) whose phone numbers match the given Zoom numbers: number → { href, name }. */
+function leadsByNumber(store, user, numbers) {
+  const list = [...new Set(numbers.map(e164).filter(Boolean))];
+  const leads = new Map();
+  if (!list.length) return leads;
+  const marks = list.map(() => '?').join(', ');
+  const scope = user.role === 'admin' ? '' : 'AND co.owner_id = ?';
+  const owner = user.role === 'admin' ? [] : [user.id];
+  const contacts = store.all(
+    `SELECT ct.id, ct.first_name, ct.last_name, ct.mobile_e164, ct.direct_e164, co.name AS company
+     FROM contacts ct JOIN companies co ON co.id = ct.company_id
+     WHERE (ct.mobile_e164 IN (${marks}) OR ct.direct_e164 IN (${marks})) ${scope}`,
+    ...list, ...list, ...owner,
+  );
+  for (const c of contacts) {
+    const name = `${[c.first_name, c.last_name].filter(Boolean).join(' ')} · ${c.company}`;
+    for (const number of [c.mobile_e164, c.direct_e164]) if (number && !leads.has(number)) leads.set(number, { href: `#/contact/${c.id}`, name });
+  }
+  for (const co of store.all(`SELECT co.id, co.name, co.hq_phone_e164 FROM companies co WHERE co.hq_phone_e164 IN (${marks}) ${scope}`, ...list, ...owner)) {
+    if (!leads.has(co.hq_phone_e164)) leads.set(co.hq_phone_e164, { href: `#/company/${co.id}`, name: co.name });
+  }
+  return leads;
+}
 
 export function zoomLogRoutes(store) {
   const r = express.Router();
@@ -31,8 +60,11 @@ export function zoomLogRoutes(store) {
       if (cache.size > 50) cache.delete(cache.keys().next().value);
     }
 
+    const report = buildReport(entry.items, range, { minConnectedSeconds });
+    const leads = leadsByNumber(store, req.user, report.calls.map((call) => call.number));
     res.json({
-      ...buildReport(entry.items, range, { minConnectedSeconds }),
+      ...report,
+      calls: report.calls.map((call) => ({ ...call, lead: leads.get(e164(call.number)) || null })),
       fetchedAt: new Date(entry.at).toISOString(),
       beforeZoomHistory: range.from.getTime() < earliest,
     });

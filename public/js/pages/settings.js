@@ -203,19 +203,33 @@ function userDialog(ctx, user, reload) {
     password: h('input', { type: 'password', autocomplete: 'new-password', placeholder: user ? 'Leave empty to keep it' : 'At least 8 characters' }),
   };
   const active = h('input', { type: 'checkbox', checked: user ? Boolean(user.active) : true });
+  // A new caller can take every lead nobody owns yet (callers only see leads assigned to them).
+  const unassigned = user ? 0 : ctx.meta.unassignedLeads;
+  const takeLeads = h('input', { type: 'checkbox', checked: true });
+  const takeLeadsRow = unassigned > 0 && h('label', { class: 'check wide' }, takeLeads, `Give this caller the ${fmt.num(unassigned)} lead${unassigned === 1 ? '' : 's'} nobody owns yet`);
+  const toggleTake = () => {
+    if (takeLeadsRow) takeLeadsRow.hidden = inputs.role.value !== 'caller';
+  };
+  inputs.role.addEventListener('change', toggleTake);
+  toggleTake();
   const save = h('button', {
     class: 'btn',
     type: 'button',
     onclick: () => busy(save, async () => {
       const body = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value]));
       if (user && !body.password) delete body.password;
+      let assigned = 0;
       if (user) {
         body.active = active.checked;
         await api(`/users/${user.id}`, { method: 'PATCH', body });
-      } else await api('/users', { method: 'POST', body });
+      } else {
+        body.assign_unassigned = Boolean(takeLeadsRow) && body.role === 'caller' && takeLeads.checked;
+        ({ assigned } = await api('/users', { method: 'POST', body }));
+      }
       await ctx.refreshMeta();
       modal.close();
-      toast(user ? 'User updated.' : 'User added. Give them their email and password to sign in.', { kind: 'ok' });
+      const leads = assigned ? ` with ${fmt.num(assigned)} lead${assigned === 1 ? '' : 's'}` : '';
+      toast(user ? 'User updated.' : `User added${leads}. Give them their email and password to sign in.`, { kind: 'ok' });
       reload();
     }),
   }, user ? 'Save' : 'Add user');
@@ -226,7 +240,8 @@ function userDialog(ctx, user, reload) {
       field('Role', inputs.role), field(user ? 'New password' : 'Password', inputs.password),
       field('Calls per day', inputs.target_calls), field('Conversations per day', inputs.target_conversations),
       field('Meetings per day', inputs.target_meetings),
-      user && h('label', { class: 'check' }, active, 'Active (can sign in)')),
+      user && h('label', { class: 'check' }, active, 'Active (can sign in)'),
+      takeLeadsRow),
     footer: [h('button', { class: 'btn secondary', type: 'button', onclick: () => modal.close() }, 'Cancel'), save],
   });
 }

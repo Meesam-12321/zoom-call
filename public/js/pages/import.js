@@ -111,7 +111,7 @@ export async function render(root, params, ctx) {
     });
     const presetName = h('input', { type: 'text', placeholder: 'Preset name, e.g. HV template v2' });
     const savePreset = h('button', {
-      class: 'btn small secondary',
+      class: 'btn secondary',
       type: 'button',
       onclick: () => busy(savePreset, async () => {
         ({ presets: upload.presets } = await api('/import/presets', { method: 'POST', body: { token: upload.token, name: presetName.value, config } }));
@@ -131,8 +131,8 @@ export async function render(root, params, ctx) {
       h('section', { class: 'card panel' },
         h('div', { class: 'panel-head' },
           h('div', {}, h('h2', {}, upload.filename), h('p', { class: 'muted small' }, upload.preset ? `Using the "${upload.preset.name}" preset.` : 'Columns were matched by their names. Check them below.')),
-          h('div', { class: 'row' }, field('Preset', preset))),
-        h('div', { class: 'row' }, presetName, savePreset)),
+          field('Preset', preset)),
+        h('div', { class: 'inline-form' }, presetName, savePreset)),
       used.map(sheetCard),
       skipped.length > 0 && h('details', { class: 'card panel extra' },
         h('summary', {}, `${skipped.length} other sheet${skipped.length === 1 ? '' : 's'} will not be imported`),

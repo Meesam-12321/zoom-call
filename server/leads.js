@@ -3,8 +3,8 @@ import express from 'express';
 import { requireAdmin } from './auth.js';
 import { nowIso } from './db.js';
 import { sendWorkbook } from './excel.js';
-import { ROLE_TYPES, STAGES } from './fields.js';
-import { clean, cleanText, guessTimeZone } from './phone.js';
+import { COMPANY_FIELDS, CONTACT_FIELDS, ROLE_TYPES, STAGES } from './fields.js';
+import { STATES, clean, cleanText, guessTimeZone } from './phone.js';
 import { activityFor, leadDetail, visibleCompany, visibleContact } from './queries.js';
 import { HttpError, companyColumns, contactColumns, createCompany, createContact, updateCompany, updateContact } from './records.js';
 import { parseDay, todayBounds, zonedParts } from './time.js';
@@ -36,9 +36,16 @@ function scopeFilters(user, f, add) {
   else if (f.owner === 'none') add('co.owner_id IS NULL');
   else if (f.owner) add('co.owner_id = ?', Number(f.owner));
   if (f.state) add('co.state = ?', f.state);
+  if (f.area) add('co.area = ?', f.area);
   if (f.stage) add('d.stage = ?', f.stage);
   if (f.priority) add('co.priority = ?', f.priority);
 }
+
+// Excel exports use the HV template's own column names and order, followed by the CRM's columns.
+const SHEET_COMPANY_COLUMNS = COMPANY_FIELDS.filter(([key]) => !['time_zone', 'lead_score'].includes(key));
+const SHEET_CONTACT_COLUMNS = CONTACT_FIELDS.filter(([key]) => !['role_type', 'do_not_call'].includes(key));
+const WIDE = new Set(['name', 'about', 'evidence_notes', 'key_people', 'source_urls', 'address', 'notes', 'current_address', 'job_title']);
+const sheetColumns = (fields) => fields.map(([key, label]) => [key, label, WIDE.has(key) ? 36 : undefined]);
 
 /** Contacts matching the Leads page filters (also used to add a filtered set to a call list). */
 export function contactQuery(store, user, f = {}) {
@@ -69,7 +76,7 @@ export function contactQuery(store, user, f = {}) {
   else if (f.dnc === 'no') add('ct.do_not_call = 0 AND co.do_not_call = 0');
   if (f.list) add('ct.id IN (SELECT contact_id FROM list_contacts WHERE list_id = ?)', Number(f.list));
   return {
-    sql: `SELECT ct.*, co.name AS company_name, co.city, co.state, co.time_zone, co.priority, co.hq_phone, co.hq_phone_e164,
+    sql: `SELECT ct.*, co.name AS company_name, co.city, co.state, co.area, co.time_zone, co.priority, co.hq_phone, co.hq_phone_e164,
         co.do_not_call AS company_dnc, co.owner_id, u.name AS owner_name, d.stage
       FROM contacts ct
       JOIN companies co ON co.id = ct.company_id
@@ -101,7 +108,10 @@ export function companyQuery(store, user, f = {}) {
   if (q) {
     const like = `%${q}%`;
     const digits = q.replace(/\D/g, '');
-    add('(co.name LIKE ? OR co.city LIKE ? OR co.website LIKE ? OR co.email LIKE ? OR co.hq_phone_e164 LIKE ?)', like, like, like, like, digits.length >= 3 ? `%${digits}%` : null);
+    add(
+      '(co.name LIKE ? OR co.city LIKE ? OR co.area LIKE ? OR co.key_people LIKE ? OR co.website LIKE ? OR co.email LIKE ? OR co.hq_phone_e164 LIKE ?)',
+      like, like, like, like, like, like, digits.length >= 3 ? `%${digits}%` : null,
+    );
   }
   if (f.dnc === 'yes') add('co.do_not_call = 1');
   else if (f.dnc === 'no') add('co.do_not_call = 0');
@@ -136,6 +146,7 @@ export function companyQuery(store, user, f = {}) {
 const COMPANY_SORTS = {
   name: 'x.name COLLATE NOCASE',
   priority: 'x.priority IS NULL, x.priority, x.name COLLATE NOCASE',
+  area: 'x.area IS NULL, x.area COLLATE NOCASE, x.city COLLATE NOCASE, x.name COLLATE NOCASE',
   city: 'x.city COLLATE NOCASE, x.name COLLATE NOCASE',
   last_called: 'x.last_called_at IS NULL, x.last_called_at DESC',
   newest: 'x.id DESC',
@@ -173,7 +184,7 @@ function dealQuery(user, f) {
   scopeFilters(user, { owner: f.owner }, add);
   if (f.q) add('co.name LIKE ?', `%${String(f.q).trim()}%`);
   return {
-    sql: `SELECT d.*, co.name AS company_name, co.city, co.state, co.priority, co.owner_id, u.name AS owner_name,
+    sql: `SELECT d.*, co.name AS company_name, co.city, co.state, co.area, co.priority, co.owner_id, u.name AS owner_name,
         ct.id AS primary_contact_id, ct.first_name, ct.last_name, ct.job_title,
         (SELECT MAX(cl.started_at) FROM calls cl WHERE cl.company_id = co.id) AS last_called_at
       FROM deals d
@@ -199,14 +210,11 @@ export function leadRoutes(store) {
     const rows = store.all(`${sql} ORDER BY ${CONTACT_SORTS[req.query.sort] || CONTACT_SORTS.company}`, ...params);
     const labels = dispositionLabels(store);
     await sendWorkbook(res, 'contacts', [{
-      name: 'Contacts',
+      name: 'Contact Information',
       columns: [
-        ['first_name', 'First name'], ['middle_name', 'Middle name'], ['last_name', 'Last name'], ['job_title', 'Job title', 28],
-        ['department', 'Department'], ['email', 'Email', 28], ['mobile', 'Mobile', 18], ['direct_line', 'Direct line', 18],
-        ['linkedin_url', 'LinkedIn URL', 30], ['location', 'Location'], ['role', 'Role type'], ['dnc', 'Do Not Call'],
-        ['notes', 'Notes', 50], ['company_name', 'Company name', 30], ['city', 'City'], ['state', 'State', 8],
-        ['hq_phone', 'HQ phone', 18], ['stage', 'Stage'], ['attempts', 'Attempts', 10], ['last_called', 'Last called', 18],
-        ['last_outcome', 'Last outcome', 24], ['owner_name', 'Owner'],
+        ...sheetColumns(SHEET_CONTACT_COLUMNS.slice(0, 6)), ['company_name', 'Company Name', 30], ...sheetColumns(SHEET_CONTACT_COLUMNS.slice(6)),
+        ['area', 'Florida Region'], ['hq_phone', 'Store Phone', 18], ['role', 'Role type'], ['dnc', 'Do Not Call'],
+        ['stage', 'Stage'], ['attempts', 'Attempts', 10], ['last_called', 'Last called', 18], ['last_outcome', 'Last outcome', 24], ['owner_name', 'Owner'],
       ],
       rows: rows.map((c) => ({
         ...c,
@@ -275,18 +283,15 @@ export function leadRoutes(store) {
     const rows = store.all(`${sql} ORDER BY ${COMPANY_SORTS[req.query.sort] || COMPANY_SORTS.name}`, ...params);
     const labels = dispositionLabels(store);
     await sendWorkbook(res, 'companies', [{
-      name: 'Companies',
+      name: 'Company Information',
       columns: [
-        ['name', 'Company name', 30], ['industry', 'Industry'], ['status', 'Status'], ['category', 'Category'],
-        ['revenue_range', 'Revenue range'], ['employee_range', 'Employee range'], ['website', 'Website', 28], ['region', 'Region'],
-        ['state', 'State', 8], ['city', 'City'], ['address', 'Address', 36], ['linkedin_url', 'LinkedIn URL', 28],
-        ['hq_phone', 'HQ phone', 18], ['email', 'Email', 26], ['date_founded', 'Date founded'], ['about', 'About', 50],
-        ['time_zone', 'Time zone', 20], ['lead_score', 'Lead score'], ['priority', 'Priority'], ['stage', 'Stage'],
-        ['owner_name', 'Owner'], ['dnc', 'Do Not Call'], ['contact_count', 'Contacts', 10], ['last_called', 'Last called', 18],
-        ['last_outcome', 'Last outcome', 24],
+        ...sheetColumns(SHEET_COMPANY_COLUMNS),
+        ['time_zone', 'Time zone', 20], ['lead_score', 'Lead score'], ['stage', 'Stage'], ['owner_name', 'Owner'], ['dnc', 'Do Not Call'],
+        ['contact_count', 'Contacts in CRM', 10], ['last_called', 'Last called', 18], ['last_outcome', 'Last outcome', 24],
       ],
       rows: rows.map((c) => ({
         ...c,
+        state: STATES[c.state] || c.state,
         stage: STAGE_LABELS[c.stage] || c.stage,
         dnc: c.do_not_call ? 'Yes' : '',
         last_called: stamp(c.last_called_at, tz()),

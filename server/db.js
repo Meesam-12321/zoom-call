@@ -28,9 +28,11 @@ CREATE TABLE IF NOT EXISTS companies (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   name_key TEXT NOT NULL,
-  industry TEXT, status TEXT, category TEXT, revenue_range TEXT, employee_range TEXT, website TEXT,
-  region TEXT, state TEXT, city TEXT, address TEXT, linkedin_url TEXT, hq_phone TEXT, hq_phone_e164 TEXT,
-  email TEXT, date_founded TEXT, about TEXT, time_zone TEXT, lead_score INTEGER, priority TEXT,
+  department TEXT, industry TEXT, status TEXT, category TEXT, revenue_range TEXT, revenue TEXT, employee_range TEXT,
+  website TEXT, region TEXT, state TEXT, city TEXT, area TEXT, address TEXT, linkedin_url TEXT, hq_phone TEXT,
+  hq_phone_e164 TEXT, email TEXT, date_founded TEXT, about TEXT, opening_hours TEXT, facebook_url TEXT,
+  instagram_url TEXT, evidence_notes TEXT, key_people TEXT, contacts_listed TEXT, source_urls TEXT,
+  time_zone TEXT, lead_score INTEGER, priority TEXT,
   owner_id INTEGER REFERENCES users (id) ON DELETE SET NULL,
   do_not_call INTEGER NOT NULL DEFAULT 0,
   dnc_at TEXT,
@@ -44,8 +46,9 @@ CREATE INDEX IF NOT EXISTS companies_owner ON companies (owner_id);
 CREATE TABLE IF NOT EXISTS contacts (
   id INTEGER PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies (id) ON DELETE CASCADE,
-  first_name TEXT, middle_name TEXT, last_name TEXT, job_title TEXT, department TEXT, email TEXT,
-  mobile TEXT, mobile_e164 TEXT, direct_line TEXT, direct_e164 TEXT, linkedin_url TEXT, location TEXT,
+  first_name TEXT, middle_name TEXT, last_name TEXT, job_title TEXT, department TEXT, management_level TEXT,
+  email TEXT, employment_status TEXT, mobile TEXT, mobile_e164 TEXT, direct_line TEXT, direct_e164 TEXT,
+  linkedin_url TEXT, current_address TEXT, location TEXT, email_type TEXT, source_urls TEXT,
   role_type TEXT NOT NULL DEFAULT 'other',
   do_not_call INTEGER NOT NULL DEFAULT 0,
   dnc_at TEXT,
@@ -175,6 +178,12 @@ CREATE TABLE IF NOT EXISTS activity (
 CREATE INDEX IF NOT EXISTS activity_entity ON activity (entity, entity_id);
 `;
 
+// Columns added after the first release; databases created before then get them on start.
+const ADDED_COLUMNS = {
+  companies: ['department', 'revenue', 'area', 'opening_hours', 'facebook_url', 'instagram_url', 'evidence_notes', 'key_people', 'contacts_listed', 'source_urls'],
+  contacts: ['management_level', 'employment_status', 'current_address', 'email_type', 'source_urls'],
+};
+
 export const DEFAULT_SETTINGS = {
   max_attempts: 8,
   conversation_seconds: 60,
@@ -200,6 +209,11 @@ export class Store {
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     this.db.exec(SCHEMA);
+    for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
+      const existing = new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+      for (const column of columns) if (!existing.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+    }
+    this.db.exec('CREATE INDEX IF NOT EXISTS companies_area ON companies (area)');
     this.statements = new Map();
     this.depth = 0;
     if (!this.get('SELECT 1 FROM dispositions LIMIT 1')) {

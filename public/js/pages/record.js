@@ -1,24 +1,19 @@
 // Company and contact pages: lead panel with calling, contacts, call history, tasks, pipeline, details and history.
 import { startCall } from '../call.js';
-import { bestPhone, leadPanel, phonesOf } from '../lead.js';
+import { bestPhone, callTimeline, leadPanel, phonesOf, urlLinks } from '../lead.js';
 import {
-  api, badge, busy, confirmDialog, field, fmt, h, icon, localInput, outcomeBadge, pageHead, select, toast,
+  api, badge, busy, confirmDialog, field, fill, fmt, h, icon, localInput, outcomeBadge, pageHead, select, toast,
 } from '../ui.js';
 import { addToListDialog, newContactDialog } from './leads.js';
 import { taskTable } from './today.js';
 
-const COMPANY_EDIT = [
-  ['name', 'Company name'], ['hq_phone', 'HQ phone'], ['website', 'Website'], ['email', 'Email'], ['industry', 'Industry'],
-  ['status', 'Status'], ['category', 'Category'], ['priority', 'Priority'], ['revenue_range', 'Revenue range'],
-  ['employee_range', 'Employee range'], ['city', 'City'], ['state', 'State', 'state'], ['region', 'Region'],
-  ['time_zone', 'Time zone', 'tz'], ['address', 'Address', 'wide'], ['linkedin_url', 'LinkedIn URL', 'wide'],
-  ['date_founded', 'Date founded'], ['lead_score', 'Lead score', 'number'], ['about', 'About', 'textarea'],
-];
-const CONTACT_EDIT = [
-  ['first_name', 'First name'], ['last_name', 'Last name'], ['middle_name', 'Middle name'], ['job_title', 'Job title'],
-  ['role_type', 'Role', 'role'], ['department', 'Department'], ['email', 'Email', 'email'], ['mobile', 'Mobile'],
-  ['direct_line', 'Direct line'], ['location', 'Location'], ['linkedin_url', 'LinkedIn URL', 'wide'], ['notes', 'Notes', 'textarea'],
-];
+// Fields and their labels come from the import sheet (ctx.meta.companyFields / contactFields). This is how each is
+// edited; the rest are one-line text boxes.
+const FIELD_KINDS = {
+  about: 'textarea', evidence_notes: 'textarea', key_people: 'textarea', source_urls: 'textarea', notes: 'textarea',
+  address: 'wide', current_address: 'wide', state: 'state', time_zone: 'tz', lead_score: 'number', role_type: 'role', email: 'email',
+};
+const URL_FIELDS = new Set(['website', 'linkedin_url', 'facebook_url', 'instagram_url', 'source_urls']);
 const ZONES = [
   ['America/New_York', 'US Eastern'], ['America/Chicago', 'US Central'], ['America/Denver', 'US Mountain'], ['America/Phoenix', 'Arizona'],
   ['America/Los_Angeles', 'US Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii'],
@@ -35,36 +30,75 @@ function panel(title, count, ...content) {
     content);
 }
 
-function detailsForm(ctx, title, fields, record, endpoint, onSaved, { owner = false } = {}) {
-  const inputs = {};
-  const controls = fields.map(([key, label, kind]) => {
-    const value = record[key] ?? '';
-    let input;
-    if (kind === 'textarea') input = h('textarea', { rows: 4, value });
-    else if (kind === 'state') input = select(withCurrent([['', '—'], ...Object.entries(ctx.meta.states)], value), value);
-    else if (kind === 'tz') input = select(withCurrent([['', 'Automatic (from state and area code)'], ...ZONES], value), value);
-    else if (kind === 'role') input = select(ctx.meta.roleTypes, value);
-    else input = h('input', { type: kind === 'number' || kind === 'email' ? kind : 'text', value });
-    inputs[key] = input;
-    return h('div', { class: kind === 'textarea' || kind === 'wide' ? 'wide' : '' }, field(label, input));
-  });
-  if (owner && ctx.isAdmin) {
-    inputs.owner_id = select([['', 'Unassigned'], ...ctx.meta.users.map((u) => [String(u.id), u.name])], record.owner_id ? String(record.owner_id) : '');
-    controls.push(h('div', {}, field('Owner (who calls this lead)', inputs.owner_id)));
+function displayValue(ctx, key, value) {
+  if (URL_FIELDS.has(key)) {
+    const links = urlLinks(value);
+    return links.length ? h('div', { class: 'url-list' }, links) : String(value);
   }
-  const save = h('button', {
-    class: 'btn',
-    type: 'button',
-    onclick: () => busy(save, async () => {
-      const original = (key) => (key === 'owner_id' ? (record.owner_id ? String(record.owner_id) : '') : String(record[key] ?? ''));
-      const body = Object.fromEntries(Object.entries(inputs).filter(([key, input]) => input.value !== original(key)).map(([key, input]) => [key, input.value]));
-      if (!Object.keys(body).length) return toast('Nothing changed.');
-      await api(endpoint, { method: 'PATCH', body });
-      toast('Saved.', { kind: 'ok' });
-      onSaved();
-    }),
-  }, 'Save changes');
-  return panel(title, null, h('div', { class: 'form-grid' }, controls), h('div', { class: 'row end section-gap' }, save));
+  if (key === 'email') return h('a', { class: 'url', href: `mailto:${value}`, title: value }, value);
+  if (key === 'state') return ctx.meta.states[value] || value;
+  if (key === 'time_zone') return `${ZONES.find(([zone]) => zone === value)?.[1] || value} (${fmt.zoneName(value)})`;
+  if (key === 'role_type') return Object.fromEntries(ctx.meta.roleTypes)[value] || value;
+  return String(value);
+}
+
+/** A record's sheet fields: the filled ones listed in sheet order, and every one editable after "Edit". */
+function detailsCard(ctx, title, fields, record, endpoint, onSaved, { owner = false } = {}) {
+  const editable = fields.filter(([key]) => key !== 'do_not_call');
+  const body = h('div', {});
+  const editButton = h('button', { class: 'btn small secondary', type: 'button', onclick: () => edit() }, 'Edit');
+
+  const view = () => {
+    editButton.hidden = false;
+    const filled = editable.filter(([key]) => record[key] !== null && record[key] !== undefined && record[key] !== '');
+    const blank = editable.length - filled.length;
+    const ownerName = record.owner_id ? ctx.meta.users.find((u) => u.id === record.owner_id)?.name : 'Unassigned';
+    fill(body,
+      h('dl', { class: 'details' },
+        filled.map(([key, label]) => h('div', {}, h('dt', {}, label), h('dd', {}, displayValue(ctx, key, record[key])))),
+        owner && h('div', {}, h('dt', {}, 'Owner (who calls this lead)'), h('dd', {}, ownerName || '—'))),
+      blank > 0 && h('p', { class: 'muted small section-gap' }, `${blank} empty field${blank === 1 ? ' is' : 's are'} hidden. Choose Edit to fill ${blank === 1 ? 'it' : 'them'} in.`));
+  };
+
+  const edit = () => {
+    editButton.hidden = true;
+    const inputs = {};
+    const controls = editable.map(([key, label]) => {
+      const kind = FIELD_KINDS[key];
+      const value = record[key] ?? '';
+      let input;
+      if (kind === 'textarea') input = h('textarea', { rows: 4, value });
+      else if (kind === 'state') input = select(withCurrent([['', '—'], ...Object.entries(ctx.meta.states)], value), value);
+      else if (kind === 'tz') input = select(withCurrent([['', 'Automatic (from state and area code)'], ...ZONES], value), value);
+      else if (kind === 'role') input = select(ctx.meta.roleTypes, value);
+      else input = h('input', { type: kind === 'number' || kind === 'email' ? kind : 'text', value });
+      inputs[key] = input;
+      return h('div', { class: kind === 'textarea' || kind === 'wide' ? 'wide' : null }, field(label, input));
+    });
+    if (owner && ctx.isAdmin) {
+      inputs.owner_id = select([['', 'Unassigned'], ...ctx.meta.users.map((u) => [String(u.id), u.name])], record.owner_id ? String(record.owner_id) : '');
+      controls.push(h('div', {}, field('Owner (who calls this lead)', inputs.owner_id)));
+    }
+    const save = h('button', {
+      class: 'btn',
+      type: 'button',
+      onclick: () => busy(save, async () => {
+        const original = (key) => (key === 'owner_id' ? (record.owner_id ? String(record.owner_id) : '') : String(record[key] ?? ''));
+        const changes = Object.fromEntries(Object.entries(inputs).filter(([key, input]) => input.value !== original(key)).map(([key, input]) => [key, input.value]));
+        if (!Object.keys(changes).length) return toast('Nothing changed.');
+        await api(endpoint, { method: 'PATCH', body: changes });
+        toast('Saved.', { kind: 'ok' });
+        onSaved();
+      }),
+    }, 'Save changes');
+    fill(body,
+      h('div', { class: 'form-grid auto' }, controls),
+      h('div', { class: 'row end section-gap' }, h('button', { class: 'btn secondary', type: 'button', onclick: view }, 'Cancel'), save));
+    body.querySelector('input, select, textarea')?.focus();
+  };
+
+  view();
+  return h('section', { class: 'card panel' }, h('div', { class: 'panel-head' }, h('h2', {}, title), editButton), body);
 }
 
 function dealCard(ctx, detail, onSaved) {
@@ -106,23 +140,9 @@ function dealCard(ctx, detail, onSaved) {
     h('div', { class: 'row end section-gap' }, h('span', { class: 'muted small' }, `Updated ${fmt.ago(deal.updated_at)}`), save));
 }
 
+// Same layout as History: each call's details on one line and its notes in full underneath, at any width.
 function callsCard(ctx, calls) {
-  const onLine = (c) => {
-    if (c.duration !== null && c.duration !== undefined) return fmt.clock(c.duration);
-    return h('span', { class: 'muted', title: 'Zoom adds the duration within a few minutes of the call.' }, Date.now() - Date.parse(c.started_at) < 3 * 86_400_000 ? 'Waiting for Zoom' : '—');
-  };
-  return panel('Calls', calls.length, calls.length
-    ? h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-      h('thead', {}, h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Outcome'), h('th', {}, 'Number'), h('th', { class: 'num' }, 'On the line'), h('th', {}, 'Caller'), h('th', {}, 'Notes'))),
-      h('tbody', {}, calls.map((c) => h('tr', {},
-        h('td', { class: 'time' }, fmt.dateTime(c.started_at)),
-        h('td', {}, outcomeBadge(ctx, c.disposition), c.meeting_booked ? h('div', {}, badge('Meeting booked', 'ok')) : null,
-          c.recording_status && c.recording_status !== 'non_recorded' ? h('div', {}, badge('Recorded in Zoom', 'info')) : null),
-        h('td', { class: 'number' }, fmt.phone(c.phone_e164), c.first_name || c.last_name ? h('div', { class: 'sub' }, fmt.name(c)) : null),
-        h('td', { class: 'num' }, onLine(c)),
-        h('td', {}, c.user_name || '—'),
-        h('td', { class: 'wrap' }, c.notes || h('span', { class: 'muted' }, '—')))))))
-    : h('p', { class: 'muted' }, 'No calls yet.'));
+  return panel('Calls', calls.length, calls.length ? callTimeline(ctx, calls) : h('p', { class: 'muted' }, 'No calls yet.'));
 }
 
 function tasksCard(ctx, detail, { contactId, companyId, onChange }) {
@@ -246,18 +266,18 @@ export async function renderContact(root, { id }, ctx, isCurrent) {
   root.replaceChildren(
     pageHead(fmt.name(contact), [contact.job_title, company.name].filter(Boolean).join(' · '), [
       dncButton(ctx, `/contacts/${contact.id}`, contact, reload),
-      deleteButton(ctx, `/contacts/${contact.id}`, 'this contact', '#/leads'),
-    ], ['Leads', '#/leads']),
+      deleteButton(ctx, `/contacts/${contact.id}`, 'this contact', '#/leads?view=contacts'),
+    ], ['Leads', '#/leads?view=contacts']),
     h('div', { class: 'split' },
       h('div', { class: 'stack' },
-        leadPanel(ctx, detail, { onCall: (phone) => startCall(ctx, { contactId: contact.id, phone, onDone: reload }) }),
+        leadPanel(ctx, detail, { activity: false, onCall: (phone) => startCall(ctx, { contactId: contact.id, phone, onDone: reload }) }),
         wrongNumbersCard(detail, reload),
         callsCard(ctx, detail.calls),
         tasksCard(ctx, detail, { contactId: contact.id, companyId: company.id, onChange: reload }),
         historyCard(ctx, detail.activity)),
       h('div', { class: 'stack' },
         dealCard(ctx, detail, reload),
-        detailsForm(ctx, 'Contact details', CONTACT_EDIT, contact, `/contacts/${contact.id}`, reload),
+        detailsCard(ctx, 'Contact Information', ctx.meta.contactFields, contact, `/contacts/${contact.id}`, reload),
         panel('Call lists', detail.lists.length,
           detail.lists.length ? h('div', { class: 'row' }, detail.lists.map((l) => h('a', { class: 'badge info', href: `#/list/${l.id}` }, l.name))) : h('p', { class: 'muted' }, 'Not on any call list.'),
           h('div', { class: 'row end section-gap' }, h('button', { class: 'btn small secondary', type: 'button', onclick: () => addToListDialog(ctx, { contactIds: [contact.id] }) }, icon('plus', 14), 'Add to a call list'))),
@@ -303,7 +323,7 @@ export async function renderCompany(root, { id }, ctx, isCurrent) {
     ], ['Leads', '#/leads?view=companies']),
     h('div', { class: 'split' },
       h('div', { class: 'stack' },
-        leadPanel(ctx, { ...detail, contact: null }, { onCall: (phone) => startCall(ctx, { companyId: company.id, phone, onDone: reload }) }),
+        leadPanel(ctx, { ...detail, contact: null }, { activity: false, onCall: (phone) => startCall(ctx, { companyId: company.id, phone, onDone: reload }) }),
         wrongNumbersCard(detail, reload),
         panel('Contacts', contacts.length, contactsTable,
           h('div', { class: 'row end section-gap' }, h('button', { class: 'btn small secondary', type: 'button', onclick: () => newContactDialog(ctx, company.id) }, icon('plus', 14), 'Add contact'))),
@@ -312,6 +332,6 @@ export async function renderCompany(root, { id }, ctx, isCurrent) {
         historyCard(ctx, detail.activity)),
       h('div', { class: 'stack' },
         dealCard(ctx, detail, reload),
-        detailsForm(ctx, 'Company details', COMPANY_EDIT, company, `/companies/${company.id}`, reload, { owner: true }))),
+        detailsCard(ctx, 'Company Information', ctx.meta.companyFields, company, `/companies/${company.id}`, reload, { owner: true }))),
   );
 }

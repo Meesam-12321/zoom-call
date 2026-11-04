@@ -74,6 +74,9 @@ export function adminRoutes(store) {
       companyFields: COMPANY_FIELDS,
       contactFields: CONTACT_FIELDS,
       states: STATES,
+      // The "Florida Region" values in use, for filters.
+      areas: store.all('SELECT DISTINCT area FROM companies WHERE area IS NOT NULL ORDER BY area').map((row) => row.area),
+      unassignedLeads: store.get('SELECT COUNT(*) AS n FROM companies WHERE owner_id IS NULL').n,
       settings,
       zoomConfigured: Boolean(process.env.ZOOM_ACCOUNT_ID && process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET),
     });
@@ -86,9 +89,16 @@ export function adminRoutes(store) {
   r.post('/users', requireAdmin, (req, res) => {
     const cols = userFields(req.body, { creating: true });
     if (store.get('SELECT 1 FROM users WHERE email = ?', cols.email)) throw new HttpError(409, 'Someone already uses that email address.');
-    const id = store.insert('users', { ...cols, created_at: nowIso() });
-    store.log(req.user.id, 'user', id, 'created', { name: cols.name, role: cols.role });
-    res.json({ id });
+    const assigned = store.tx(() => {
+      const id = store.insert('users', { ...cols, created_at: nowIso() });
+      store.log(req.user.id, 'user', id, 'created', { name: cols.name, role: cols.role });
+      // A new caller can take over every lead nobody owns yet, so they see them straight away.
+      if (!req.body.assign_unassigned) return { id, count: 0 };
+      const count = Number(store.run('UPDATE companies SET owner_id = ?, updated_at = ? WHERE owner_id IS NULL', id, nowIso()).changes);
+      if (count) store.log(req.user.id, 'user', id, 'leads_assigned', { count });
+      return { id, count };
+    });
+    res.json({ id: assigned.id, assigned: assigned.count });
   });
 
   r.patch('/users/:id', requireAdmin, (req, res) => {

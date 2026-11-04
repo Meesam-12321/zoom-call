@@ -25,37 +25,52 @@ const normalizeHeader = (header) => String(header).toLowerCase().replace(/[^a-z0
 // Spreadsheet headers (normalized) for each CRM field, best match first. Each field takes at most one column.
 const SYNONYMS = {
   'company.name': ['company name', 'company', 'business name', 'account name', 'organization', 'organisation', 'store name'],
+  'company.department': ['pt department', 'company department'],
   'company.industry': ['industry'],
   'company.status': ['company status'],
   'company.category': ['company category', 'category'],
-  'company.revenue_range': ['revenue range', 'revenue'],
+  'company.revenue_range': ['revenue range'],
+  'company.revenue': ['revenue', 'annual revenue'],
   'company.employee_range': ['employees range', 'employee range', 'employees', 'company size', 'headcount'],
   'company.website': ['website', 'website url', 'company website', 'web', 'url', 'domain'],
-  'company.region': ['florida region', 'region'],
+  'company.region': ['region', 'country'],
   'company.state': ['location province state', 'state', 'province', 'state province'],
-  'company.city': ['city', 'town'],
   'company.address': ['address', 'company address', 'street address', 'store address'],
   'company.linkedin_url': ['linkedin company profile url', 'company linkedin', 'company linkedin url', 'linkedin company url'],
   'company.hq_phone': ['company hq number', 'hq phone', 'hq number', 'company phone', 'store phone', 'main phone', 'business phone', 'public business phone', 'phone', 'phone number'],
-  'company.email': ['store email', 'company email', 'business email', 'public business email', 'general email'],
   'company.date_founded': ['date founded', 'founded', 'year founded', 'established'],
   'company.about': ['about company', 'about', 'company description', 'description'],
+  'company.area': ['florida region', 'area', 'territory', 'sales region', 'market'],
+  'company.city': ['city', 'town'],
+  'company.email': ['store email', 'company email', 'business email', 'public business email', 'general email'],
+  'company.opening_hours': ['opening hours', 'hours', 'business hours', 'store hours'],
+  'company.facebook_url': ['facebook page', 'facebook', 'facebook url'],
+  'company.instagram_url': ['instagram', 'instagram url', 'instagram page'],
+  'company.priority': ['priority', 'priority tier', 'tier'],
+  'company.evidence_notes': ['evidence additional notes', 'evidence', 'additional notes', 'company notes'],
+  'company.key_people': ['owners key people', 'key people', 'owners', 'owner decision maker name', 'decision makers'],
+  'company.contacts_listed': ['contacts listed'],
+  'company.source_urls': ['research source urls', 'source urls', 'sources'],
   'company.time_zone': ['time zone', 'timezone'],
   'company.lead_score': ['lead score', 'score'],
-  'company.priority': ['priority', 'priority tier', 'tier'],
   'contact.first_name': ['first name', 'firstname', 'first'],
   'contact.middle_name': ['middle name', 'middle'],
   'contact.last_name': ['last name', 'lastname', 'surname', 'last'],
   'contact.job_title': ['job title', 'title', 'position', 'designation'],
   'contact.department': ['department'],
+  'contact.management_level': ['management level', 'seniority'],
   'contact.email': ['email', 'email address', 'work email', 'contact email', 'e mail'],
+  'contact.employment_status': ['employment status'],
   'contact.mobile': ['mobile', 'mobile phone', 'mobile number', 'cell', 'cell phone'],
   'contact.direct_line': ['direct', 'direct line', 'direct phone', 'direct dial', 'direct number', 'phone', 'phone number', 'work phone'],
   'contact.linkedin_url': ['linkedin profile', 'linkedin', 'linkedin url', 'linkedin profile url'],
+  'contact.current_address': ['current address', 'contact address'],
   'contact.location': ['location', 'contact location'],
+  'contact.email_type': ['email type'],
+  'contact.notes': ['research first call note', 'first call note', 'notes', 'note', 'comments'],
+  'contact.source_urls': ['source urls', 'sources'],
   'contact.role_type': ['role type'],
   'contact.do_not_call': ['do not call', 'dnc'],
-  'contact.notes': ['research first call note', 'first call note', 'notes', 'note', 'comments'],
 };
 const KNOWN_HEADERS = new Set(Object.values(SYNONYMS).flat());
 const ROW_NUMBER = /^(?:no|#|sr|sl|s no|row|row number)$/;
@@ -436,6 +451,21 @@ function commit(store, user, built, { decisions, ownerId, listName, createMissin
     store.log(user.id, 'import', null, 'completed', { file: filename, companies: result.companies, contacts: result.contacts });
     return result;
   });
+}
+
+/**
+ * Imports a whole file in one step with its matching preset (or automatic mapping), accepting the suggested action
+ * for every duplicate. Used by the command-line importer (scripts/import.js).
+ */
+export async function importWorkbook(store, user, buffer, filename, { ownerId = null, listName = null, createMissingCompanies = false } = {}) {
+  const sheets = (await readWorkbook(buffer, filename)).map(prepareSheet).filter((sheet) => sheet.records.length);
+  const upload = { filename, sheets };
+  const preset = matchPreset(store, sheets);
+  const built = buildRecords(upload, validConfig(upload, configFor(sheets, preset)));
+  analyze(store, built);
+  const checked = report(built);
+  const result = commit(store, user, built, { decisions: {}, ownerId, listName, createMissingCompanies, filename });
+  return { preset: preset?.name ?? 'automatic matching', report: checked, result };
 }
 
 function getUpload(token) {

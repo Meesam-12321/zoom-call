@@ -15,7 +15,8 @@ export class HttpError extends Error {
 const COMPANY_KEYS = new Set(COMPANY_FIELDS.map(([key]) => key));
 const CONTACT_KEYS = new Set(CONTACT_FIELDS.map(([key]) => key));
 const ROLE_KEYS = new Set(ROLE_TYPES.map(([key]) => key));
-const LONG_TEXT = new Set(['about', 'notes']);
+// Multi-line fields keep their line breaks (e.g. one research URL per line).
+const LONG_TEXT = new Set(['about', 'notes', 'evidence_notes', 'key_people', 'source_urls']);
 // Columns derived from others; they are not shown in change history.
 const DERIVED = new Set(['name_key', 'hq_phone_e164', 'mobile_e164', 'direct_e164', 'updated_at']);
 
