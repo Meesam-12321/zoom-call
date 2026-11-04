@@ -1,5 +1,5 @@
 // Sign-in, and first-run setup of the admin account.
-import { api, field, h } from '../ui.js';
+import { api, field, h, logo, themeButton } from '../ui.js';
 
 export function renderAuth(state) {
   const error = h('div', { class: 'alert', role: 'alert', hidden: true });
@@ -33,8 +33,8 @@ export function renderAuth(state) {
     },
   },
   h('div', {},
-    h('h1', {}, setup ? 'Set up the CRM' : 'Sign in'),
-    h('p', { class: 'muted' }, setup ? 'Create the admin account. You can add your callers in Settings afterwards.' : 'Cold-Calling CRM')),
+    h('h2', {}, setup ? 'Create the admin account' : 'Sign in'),
+    h('p', { class: 'muted' }, setup ? 'You can add your callers in Settings afterwards.' : 'Welcome back.')),
   error,
   setup && field('Your name', inputs.name),
   field('Email', inputs.email),
@@ -42,6 +42,12 @@ export function renderAuth(state) {
   setup && state.setupCodeRequired && field('Setup code', inputs.setupCode, 'Shown in the terminal where the CRM server is running.'),
   submit);
 
-  document.getElementById('app').replaceChildren(h('div', { class: 'auth-wrap' }, form));
+  document.getElementById('app').replaceChildren(h('div', { class: 'auth-wrap' },
+    themeButton('auth-theme'),
+    h('div', { class: 'auth-hero' },
+      h('span', { class: 'brand' }, logo()),
+      h('h1', { class: 'hero-title' }, 'Every call. ', h('em', {}, 'Every lead.')),
+      h('p', { class: 'hero-sub' }, 'Your cold-calling CRM, from first dial to booked meeting.')),
+    form));
   (setup ? inputs.name : inputs.email).focus();
 }

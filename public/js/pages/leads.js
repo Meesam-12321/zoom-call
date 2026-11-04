@@ -68,15 +68,69 @@ export async function render(root, { query }, ctx, isCurrent) {
     );
   }
 
-  const set = (key) => (event) => {
-    state[key] = event.target.value;
+  const quick = [['lastCalled', 'never', 'Never called'], ['lastCalled', 'today', 'Called today'], ['priority', 'A', 'Priority A'], ['dnc', 'no', 'Callable']];
+  const controls = {};
+  const chips = h('div', { class: 'chips' });
+  const filterPanel = h('div', { class: 'card filter-panel', hidden: true });
+
+  function setFilter(key, value) {
+    state[key] = value;
     state.page = 1;
+    if (controls[key]) controls[key].value = value;
+    drawChips();
     load();
+  }
+  const pick = (key, options, label) => {
+    controls[key] = select(options, state[key], { onchange: (event) => setFilter(key, event.target.value) });
+    return field(label, controls[key]);
   };
-  const search = h('input', { type: 'search', value: state.q, placeholder: 'Company, person, city, region, phone or email', oninput: debounce(set('q')) });
+  const activeFilters = () => FILTERS.filter((key) => key !== 'q' && key !== 'sort' && state[key]).length;
+
+  function drawChips() {
+    const count = activeFilters();
+    fill(chips,
+      quick.map(([key, value, label]) => {
+        const on = state[key] === value;
+        return h('button', { class: `chip${on ? ' on' : ''}`, type: 'button', 'aria-pressed': String(on), onclick: () => setFilter(key, on ? '' : value) }, label);
+      }),
+      h('button', {
+        class: `chip${filterPanel.hidden ? '' : ' on'}`,
+        type: 'button',
+        'aria-expanded': String(!filterPanel.hidden),
+        onclick: () => {
+          filterPanel.hidden = !filterPanel.hidden;
+          drawChips();
+        },
+      }, icon('filter', 14), 'More filters', count ? h('span', { class: 'count' }, count) : null),
+      count ? h('button', {
+        class: 'btn small ghost',
+        type: 'button',
+        onclick: () => {
+          for (const key of FILTERS) if (key !== 'q' && key !== 'sort') state[key] = '';
+          for (const [key, control] of Object.entries(controls)) if (key !== 'sort') control.value = '';
+          setFilter('q', state.q);
+        },
+      }, icon('x', 14), 'Clear filters') : null);
+  }
+
+  const search = h('input', { type: 'search', value: state.q, placeholder: 'Search company, person, city, region, phone or email', 'aria-label': 'Search leads', oninput: debounce((event) => setFilter('q', event.target.value)) });
   const areaLabel = fieldLabel(ctx.meta.companyFields, 'area');
   const states = [['', 'Any state'], ...Object.entries(ctx.meta.states).map(([code, name]) => [code, name])];
   const outcomes = [['', 'Any outcome'], ['none', 'Never called'], ...ctx.meta.dispositions.map((d) => [d.key, d.label])];
+
+  fill(filterPanel, h('div', { class: 'toolbar' },
+    ctx.meta.areas.length > 0 && pick('area', [['', 'Any'], ...ctx.meta.areas.map((area) => [area, area])], areaLabel),
+    pick('state', states, 'State'),
+    pick('stage', [['', 'Any stage'], ...ctx.meta.stages], 'Stage'),
+    pick('disposition', outcomes, 'Last outcome'),
+    pick('lastCalled', [['', 'Any time'], ['never', 'Never'], ['today', 'Today'], ['week', 'In the last 7 days'], ['older', 'Over 7 days ago']], 'Last called'),
+    pick('priority', [['', 'Any'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D']], 'Priority'),
+    ctx.isAdmin && pick('owner', [['', 'Anyone'], ['none', 'Unassigned'], ...ctx.meta.users.map((u) => [String(u.id), u.name])], 'Owner'),
+    pick('dnc', [['', 'Any'], ['no', 'Callable'], ['yes', 'Do Not Call']], 'Do Not Call'),
+    pick('sort', [['', SORTS[state.view][0][1]], ...SORTS[state.view].slice(1)], 'Sort')));
+  // Opened from a link with a filter that has no quick chip: show it.
+  if (FILTERS.some((key) => key !== 'q' && state[key] && !quick.some(([k, v]) => k === key && v === state[key]))) filterPanel.hidden = false;
+  drawChips();
 
   root.replaceChildren(
     pageHead('Leads', total, [
@@ -84,23 +138,16 @@ export async function render(root, { query }, ctx, isCurrent) {
       h('button', { class: 'btn secondary', type: 'button', onclick: () => newCompanyDialog(ctx) }, icon('plus'), 'New company'),
       h('button', { class: 'btn', type: 'button', onclick: () => newContactDialog(ctx) }, icon('plus'), 'New contact'),
     ]),
-    tabs([['companies', 'Companies'], ['contacts', 'Contacts']], state.view, (view) => {
-      state.view = view;
-      state.page = 1;
-      if (!SORTS[view].some(([key]) => key === state.sort)) state.sort = '';
-      render(root, { query: new URLSearchParams({ view, ...Object.fromEntries(filterParams()) }) }, ctx, isCurrent);
-    }),
-    h('div', { class: 'toolbar' },
-      h('label', { class: 'field grow' }, h('span', {}, 'Search'), search),
-      ctx.meta.areas.length > 0 && field(areaLabel, select([['', 'Any'], ...ctx.meta.areas.map((area) => [area, area])], state.area, { onchange: set('area') })),
-      field('State', select(states, state.state, { onchange: set('state') })),
-      field('Stage', select([['', 'Any stage'], ...ctx.meta.stages], state.stage, { onchange: set('stage') })),
-      field('Last outcome', select(outcomes, state.disposition, { onchange: set('disposition') })),
-      field('Last called', select([['', 'Any time'], ['never', 'Never'], ['today', 'Today'], ['week', 'In the last 7 days'], ['older', 'Over 7 days ago']], state.lastCalled, { onchange: set('lastCalled') })),
-      field('Priority', select([['', 'Any'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D']], state.priority, { onchange: set('priority') })),
-      ctx.isAdmin && field('Owner', select([['', 'Anyone'], ['none', 'Unassigned'], ...ctx.meta.users.map((u) => [String(u.id), u.name])], state.owner, { onchange: set('owner') })),
-      field('Do Not Call', select([['', 'Any'], ['no', 'Callable'], ['yes', 'Do Not Call']], state.dnc, { onchange: set('dnc') })),
-      field('Sort', select([['', SORTS[state.view][0][1]], ...SORTS[state.view].slice(1)], state.sort, { onchange: set('sort') }))),
+    h('div', { class: 'leads-bar' },
+      h('div', { class: 'searchbar' }, icon('search'), search),
+      tabs([['companies', 'Companies'], ['contacts', 'Contacts']], state.view, (view) => {
+        state.view = view;
+        state.page = 1;
+        if (!SORTS[view].some(([key]) => key === state.sort)) state.sort = '';
+        render(root, { query: new URLSearchParams({ view, ...Object.fromEntries(filterParams()) }) }, ctx, isCurrent);
+      })),
+    chips,
+    filterPanel,
     h('section', { class: 'card panel' }, h('div', { class: 'panel-head' }, bulk), tableBox),
   );
   await load();

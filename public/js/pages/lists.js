@@ -2,7 +2,7 @@
 import { startCall } from '../call.js';
 import { bestPhone, leadPanel } from '../lead.js';
 import {
-  api, badge, busy, confirmDialog, empty, exportButton, field, fmt, h, icon, openModal, outcomeBadge, pageHead, stageBadge, toast,
+  api, badge, busy, confirmDialog, empty, exportButton, field, fmt, h, icon, meter, openModal, outcomeBadge, pageHead, stageBadge, toast,
 } from '../ui.js';
 
 function newListDialog(ctx) {
@@ -31,15 +31,20 @@ export async function renderLists(root, params, ctx, isCurrent) {
       h('button', { class: 'btn', type: 'button', onclick: () => newListDialog(ctx) }, icon('plus'), 'New list'),
     ]),
     lists.length
-      ? h('section', { class: 'card panel' }, h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'List'), h('th', { class: 'num' }, 'Leads'), h('th', { class: 'num' }, 'Never called'), h('th', { class: 'num' }, 'Called today'), h('th', {}, 'Created'), h('th', {}))),
-        h('tbody', {}, lists.map((l) => h('tr', {},
-          h('td', { class: 'title-cell' }, h('a', { href: `#/list/${l.id}` }, l.name)),
-          h('td', { class: 'num' }, fmt.num(l.total)),
-          h('td', { class: 'num' }, fmt.num(l.never_called)),
-          h('td', { class: 'num' }, fmt.num(l.called_today)),
-          h('td', { class: 'time' }, `${fmt.date(l.created_at)}${l.created_by_name ? ` · ${l.created_by_name}` : ''}`),
-          h('td', { class: 'actions' }, h('a', { class: 'btn small call', href: `#/dial/${l.id}` }, icon('play', 14), 'Start dialing'))))))))
+      ? h('div', { class: 'list-grid' }, lists.map((l) => {
+        const called = l.total - l.never_called;
+        return h('article', { class: 'card list-card' },
+          h('div', {},
+            h('a', { class: 'list-name', href: `#/list/${l.id}` }, l.name),
+            h('div', { class: 'muted small' }, `${fmt.date(l.created_at)}${l.created_by_name ? ` · ${l.created_by_name}` : ''}`)),
+          h('div', { class: 'list-stats' },
+            [['Leads', l.total], ['Never called', l.never_called], ['Called today', l.called_today]].map(([label, value]) =>
+              h('div', {}, h('strong', {}, fmt.num(value)), h('span', { class: 'muted small' }, label)))),
+          h('div', {}, meter(called, l.total, { goal: false }), h('div', { class: 'muted small section-gap-sm' }, `${fmt.num(called)} of ${fmt.num(l.total)} called at least once`)),
+          h('div', { class: 'row' },
+            h('a', { class: 'btn call', href: `#/dial/${l.id}` }, icon('play', 14), 'Start dialing'),
+            h('a', { class: 'btn secondary', href: `#/list/${l.id}` }, 'Open list')));
+      }))
       : empty('No call lists yet. Importing a spreadsheet can create one, or use "New list".'),
   );
 }
@@ -133,13 +138,17 @@ export async function renderDialer(root, { id }, ctx, isCurrent) {
   if (!isCurrent()) return;
   const view = h('div', { class: 'stack' }, h('div', { class: 'loading-state' }, 'Finding the next lead…'));
   const progress = h('span', { class: 'muted' });
+  const progressBar = h('div', { class: 'dial-progress' });
   let currentId = null;
 
   async function show(contactId, counts) {
     const detail = await api(`/contacts/${contactId}`);
     if (!isCurrent()) return;
     currentId = contactId;
-    if (counts) progress.textContent = `${fmt.num(counts.remaining)} of ${fmt.num(counts.total)} leads ready to call today`;
+    if (counts) {
+      progress.textContent = `${fmt.num(counts.remaining)} of ${fmt.num(counts.total)} leads ready to call today`;
+      progressBar.replaceChildren(meter(counts.total - counts.remaining, counts.total, { goal: false }));
+    }
     view.replaceChildren(leadPanel(ctx, detail, {
       onCall: (phone) => startCall(ctx, {
         contactId,
@@ -168,6 +177,7 @@ export async function renderDialer(root, { id }, ctx, isCurrent) {
   const skip = h('button', { class: 'btn secondary', type: 'button', onclick: () => busy(skip, advance) }, icon('skip'), 'Skip');
   root.replaceChildren(
     pageHead(`Dialing · ${list.name}`, progress, [skip, h('a', { class: 'btn ghost', href: `#/list/${list.id}` }, 'End session')], ['Call lists', '#/lists']),
+    progressBar,
     view,
   );
   await advance();

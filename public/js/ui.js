@@ -59,11 +59,18 @@ const ICONS = {
   refresh: ['M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8', 'M21 3v5h-5', 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16', 'M8 16H3v5'],
   outbound: ['M7 7h10v10', 'M7 17 17 7'],
   inbound: ['M17 7 7 17', 'M17 17H7V7'],
+  sun: ['M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M12 2v2', 'M12 20v2', 'm4.93 4.93 1.41 1.41', 'm17.66 17.66 1.41 1.41', 'M2 12h2', 'M20 12h2', 'm6.34 17.66-1.41 1.41', 'm19.07 4.93-1.41 1.41'],
+  moon: ['M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z'],
+  menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+  arrow: ['M5 12h14', 'm12 5 7 7-7 7'],
+  chevron: ['m6 9 6 6 6-6'],
+  sheet: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M8 13h2', 'M14 13h2', 'M8 17h2', 'M14 17h2'],
+  filter: ['M3 6h18', 'M7 12h10', 'M10 18h4'],
 };
 
 export function icon(name, size = 16) {
   const el = document.createElementNS(SVG_NS, 'svg');
-  for (const [key, value] of Object.entries({ width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) {
+  for (const [key, value] of Object.entries({ width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.75, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) {
     el.setAttribute(key, value);
   }
   for (const d of ICONS[name] || []) {
@@ -72,6 +79,54 @@ export function icon(name, size = 16) {
     el.append(path);
   }
   return el;
+}
+
+// The Veloq logo: the mark, then the "veloq" wordmark (traced from veloq.tech/assets/logo_black.svg). Uses the text color.
+const MARK = 'M225 0V7L214 41L129 197L124 201H93L89 198V192L154 76L113 98L116 112L79 176L0 37V30L3 28H50L54 30L58 35L83 82Z';
+const WORD = 'M468 37L481 38L481 159L480 161L467 160L468 37ZM395 72L408 72L417 74L432 83L439 91L444 101L446 109L446 121L371 122L372 130L376 137L383 144L394 149L411 149L423 142L429 135L440 141L440 145L433 152L415 161L394 162L377 156L365 145L362 138L360 137L356 123L356 113L358 103L363 92L373 81L375 81L379 77L395 72ZM541 72L560 73L578 82L590 98L594 112L593 128L584 146L569 158L555 162L534 161L523 156L509 143L502 127L502 108L508 93L519 81L521 81L525 77L541 72ZM647 72L659 72L668 74L680 81L685 87L687 87L688 74L701 75L701 190L687 190L687 165L687 148L685 148L677 156L668 160L659 162L646 162L635 159L625 153L618 146L612 136L609 127L609 109L615 93L620 88L620 86L630 78L647 72ZM259 74L272 75L301 139L304 138L332 77L335 74L347 74L347 78L341 91L339 92L339 95L334 102L331 112L321 130L321 133L308 160L297 160L258 79L259 74ZM396 85L388 87L380 92L373 101L371 110L406 110L431 110L431 104L428 98L415 87L408 85L396 85ZM542 85L532 88L521 98L516 110L516 124L521 136L529 144L540 149L554 149L565 145L575 135L579 126L580 113L575 99L566 90L554 85L542 85ZM651 85L638 89L628 98L623 110L623 125L630 139L637 145L647 149L659 149L666 148L672 145L680 138L686 127L687 112L684 102L676 92L664 86L651 85Z';
+
+export function logo() {
+  const el = document.createElementNS(SVG_NS, 'svg');
+  el.setAttribute('viewBox', '0 0 701 201');
+  el.setAttribute('role', 'img');
+  el.setAttribute('aria-label', 'Veloq');
+  for (const d of [MARK, WORD]) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'currentColor');
+    path.setAttribute('fill-rule', 'evenodd');
+    el.append(path);
+  }
+  return el;
+}
+
+// ---------- theme (theme.js applies the saved one before the first paint)
+
+export const currentTheme = () => document.documentElement.getAttribute('data-theme') || 'light';
+
+export function toggleTheme() {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem('veloq-theme', next);
+  } catch {
+    // Storage blocked: the choice lasts until the page reloads.
+  }
+  window.dispatchEvent(new Event('themechange'));
+}
+
+/** The sun / moon button; it shows the theme you would switch to. */
+export function themeButton(extraClass = '') {
+  const button = h('button', { class: `icon-btn nav-icon ${extraClass}`, type: 'button', onclick: toggleTheme });
+  const draw = () => {
+    const dark = currentTheme() === 'dark';
+    button.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
+    button.setAttribute('aria-label', button.title);
+    button.replaceChildren(icon(dark ? 'sun' : 'moon', 18));
+  };
+  window.addEventListener('themechange', draw);
+  draw();
+  return button;
 }
 
 // ---------- API
@@ -250,6 +305,17 @@ export function tabs(items, active, onChange) {
   return h('div', { class: 'tabs', role: 'tablist' },
     items.map(([key, label]) => h('button', { class: `tab${key === active ? ' active' : ''}`, type: 'button', role: 'tab', 'aria-selected': String(key === active), onclick: () => onChange(key) }, label)));
 }
+
+/** A progress bar. Green means a target was reached, so only goals get it (goal: false for plain shares). */
+export function meter(value, target, { goal = true } = {}) {
+  const share = target ? Math.min(1, value / target) : 0;
+  const bar = h('div', {});
+  bar.style.width = `${Math.round(share * 100)}%`;
+  return h('div', { class: `meter${goal && target && value >= target ? ' done' : ''}`, role: 'img', 'aria-label': target ? `${value} of ${target}` : String(value) }, bar);
+}
+
+/** The switch between the two report pages. */
+export const reportTabs = (ctx, active) => tabs([['dashboard', 'Dashboard'], ['zoom', 'Zoom call log']], active, (key) => ctx.navigate(`#/${key}`));
 
 export const empty = (text) => h('div', { class: 'empty-state' }, text);
 

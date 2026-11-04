@@ -1,5 +1,6 @@
-// CRM entry point: sign-in, the app shell (sidebar + page), hash routing, the pending-outcome banner and reminders.
+// CRM entry point: sign-in, the app shell (top bar + page), search, hash routing, the pending-outcome banner and reminders.
 import { showOutcome } from './call.js';
+import { openPalette } from './palette.js';
 import { renderAuth } from './pages/auth.js';
 import * as dashboard from './pages/dashboard.js';
 import * as importer from './pages/import.js';
@@ -11,7 +12,7 @@ import * as record from './pages/record.js';
 import * as settings from './pages/settings.js';
 import * as today from './pages/today.js';
 import * as zoomlog from './pages/zoomlog.js';
-import { api, fmt, h, icon, setZone, toast } from './ui.js';
+import { api, fmt, h, icon, logo, setZone, themeButton, toast, toggleTheme } from './ui.js';
 
 const ROUTES = {
   today: today.render,
@@ -30,19 +31,17 @@ const ROUTES = {
   settings: settings.render,
 };
 
-// [route, label, icon, admin only]
+// [route, label, icon, admin only]. Settings lives in the account menu; the Zoom call log is a tab inside Reports.
 const NAV = [
   ['today', 'Today', 'today'],
   ['leads', 'Leads', 'leads'],
   ['pipeline', 'Pipeline', 'pipeline'],
   ['lists', 'Call lists', 'lists'],
   ['inbox', 'Inbox', 'inbox', true],
-  ['dashboard', 'Dashboard', 'dashboard'],
-  ['zoom', 'Zoom call log', 'zoom'],
+  ['dashboard', 'Reports', 'dashboard'],
   ['import', 'Import', 'import', true],
-  ['settings', 'Settings', 'settings'],
 ];
-const ACTIVE = { company: 'leads', contact: 'leads', list: 'lists', dial: 'lists', thread: 'inbox' };
+const ACTIVE = { company: 'leads', contact: 'leads', list: 'lists', dial: 'lists', thread: 'inbox', zoom: 'dashboard' };
 
 const ctx = {
   meta: null,
@@ -52,6 +51,7 @@ const ctx = {
   rerender: () => route(),
   refreshMeta,
   setPending,
+  startCalling,
 };
 
 let routeSeq = 0;
@@ -63,29 +63,99 @@ async function refreshMeta() {
   setZone(ctx.meta.settings.business_tz);
 }
 
+/** Opens the dialer on the newest list that still has leads nobody has called. */
+async function startCalling() {
+  try {
+    const { lists } = await api('/lists');
+    const list = lists.find((l) => l.never_called > 0) || lists.find((l) => l.total > 0);
+    ctx.navigate(list ? `#/dial/${list.id}` : '#/lists');
+  } catch (error) {
+    toast(error.message, { kind: 'error' });
+  }
+}
+
+async function signOut() {
+  await api('/auth/logout', { method: 'POST' }).catch(() => {});
+  location.hash = '';
+  location.reload();
+}
+
+async function syncZoom() {
+  try {
+    const { linked } = await api('/zoom/sync', { method: 'POST' });
+    toast(linked ? `Zoom synced: ${linked} call${linked === 1 ? '' : 's'} matched to leads.` : 'Zoom is up to date.', { kind: 'ok' });
+  } catch (error) {
+    toast(error.message, { kind: 'error' });
+  }
+}
+
+function search() {
+  const go = (hash) => () => ctx.navigate(hash);
+  const pages = [...NAV.filter(([, , , adminOnly]) => !adminOnly || ctx.isAdmin), ['zoom', 'Zoom call log', 'zoom'], ['settings', 'Settings', 'settings']]
+    .map(([key, label, iconName]) => ({ label, icon: iconName, run: go(`#/${key}`) }));
+  openPalette([
+    { label: 'Start calling', icon: 'play', run: startCalling },
+    ...pages,
+    ctx.meta.zoomConfigured && { label: 'Sync Zoom calls now', icon: 'refresh', run: syncZoom },
+    { label: 'Switch theme (light / dark)', icon: 'moon', run: toggleTheme },
+    { label: 'Sign out', icon: 'logout', run: signOut },
+  ].filter(Boolean));
+}
+
+/** A menu that closes on the next click anywhere else. */
+function popover(trigger, content) {
+  const panel = h('div', { class: 'popover', hidden: true }, content);
+  const setOpen = (open) => {
+    panel.hidden = !open;
+    trigger.setAttribute('aria-expanded', String(open));
+  };
+  trigger.setAttribute('aria-haspopup', 'true');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.addEventListener('click', () => setOpen(panel.hidden));
+  panel.addEventListener('click', () => setOpen(false));
+  const wrap = h('div', { class: 'popover-wrap' }, trigger, panel);
+  document.addEventListener('mousedown', (event) => {
+    if (!wrap.contains(event.target)) setOpen(false);
+  });
+  return wrap;
+}
+
 function renderShell() {
-  const nav = NAV.filter(([, , , adminOnly]) => !adminOnly || ctx.isAdmin).map(([key, label, iconName]) =>
-    h('a', { href: `#/${key}`, 'data-route': key }, icon(iconName, 16), label));
+  const nav = h('nav', { class: 'nav', 'aria-label': 'Main' },
+    NAV.filter(([, , , adminOnly]) => !adminOnly || ctx.isAdmin).map(([key, label, iconName]) =>
+      h('a', { href: `#/${key}`, 'data-route': key }, icon(iconName, 16), label, key === 'today' && h('span', { class: 'nav-count', id: 'today-count', hidden: true }))));
+  nav.addEventListener('click', () => nav.classList.remove('open'));
   const initials = ctx.user.name.split(/\s+/).map((word) => word[0]).join('').slice(0, 2).toUpperCase();
+  const shortcut = /mac/i.test(navigator.platform) ? '⌘K' : 'Ctrl K';
+
   document.getElementById('app').replaceChildren(h('div', { class: 'shell' },
-    h('aside', { class: 'sidebar' },
-      h('div', { class: 'brand' }, h('span', { class: 'brand-mark' }, icon('phone', 16)), 'Cold-Calling CRM'),
-      h('nav', { class: 'nav', 'aria-label': 'Main' }, nav),
-      h('div', { class: 'sidebar-foot' },
-        h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials),
-        h('div', { class: 'user-meta' }, h('div', { class: 'user-name', title: ctx.user.name }, ctx.user.name), h('div', { class: 'muted small' }, ctx.isAdmin ? 'Admin' : 'Caller')),
-        h('button', {
-          class: 'icon-btn',
-          type: 'button',
-          title: 'Sign out',
-          'aria-label': 'Sign out',
-          onclick: async () => {
-            await api('/auth/logout', { method: 'POST' }).catch(() => {});
-            location.hash = '';
-            location.reload();
-          },
-        }, icon('logout')))),
+    h('header', { class: 'topbar' },
+      h('div', { class: 'topnav' },
+        h('a', { class: 'brand', href: '#/today', title: 'Veloq CRM home' }, logo()),
+        nav,
+        h('div', { class: 'nav-side' },
+          h('button', { class: 'search-pill', type: 'button', title: `Search (${shortcut})`, 'aria-label': 'Search', onclick: search }, icon('search', 16), h('span', {}, 'Search'), h('kbd', {}, shortcut)),
+          themeButton(),
+          h('button', { class: 'btn nav-cta', type: 'button', title: 'Start calling', onclick: startCalling },
+            h('span', { class: 'cta-label' }, 'Start calling'), h('span', { class: 'arrow' }, icon('arrow', 16)), h('span', { class: 'cta-icon' }, icon('phone', 16))),
+          h('button', { class: 'icon-btn nav-icon menu-toggle', type: 'button', 'aria-label': 'Menu', onclick: () => nav.classList.toggle('open') }, icon('menu', 18)),
+          popover(h('button', { class: 'avatar-btn', type: 'button', 'aria-label': `Account: ${ctx.user.name}` }, initials), [
+            h('div', { class: 'popover-head' }, h('strong', {}, ctx.user.name), h('span', { class: 'muted small' }, ctx.isAdmin ? 'Admin' : 'Caller')),
+            h('a', { class: 'popover-item', href: '#/settings' }, icon('settings'), 'Settings'),
+            h('button', { class: 'popover-item', type: 'button', onclick: signOut }, icon('logout'), 'Sign out'),
+          ])))),
     h('main', { class: 'main' }, h('div', { id: 'pending', hidden: true }), h('div', { id: 'page' }))));
+}
+
+// Ctrl+K / Cmd+K anywhere, or "/" when not typing. Nothing opens over a dialog (call outcomes must be finished first).
+function listenForSearch() {
+  document.addEventListener('keydown', (event) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
+    const wanted = ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') || (event.key === '/' && !typing);
+    if (!wanted || document.querySelector('.overlay')) return;
+    event.preventDefault();
+    search();
+  });
 }
 
 async function route() {
@@ -137,6 +207,11 @@ async function poll() {
     const { reminders, pending } = await api('/reminders');
     setPending(pending);
     reminders.forEach(notify);
+    const { overdue, today } = await api(`/today${ctx.isAdmin ? '?user=all' : ''}`);
+    const count = overdue.length + today.length;
+    const badge = document.getElementById('today-count');
+    badge.textContent = count;
+    badge.hidden = !count;
   } catch {
     // Offline for a moment; the next poll retries.
   }
@@ -151,6 +226,7 @@ async function boot() {
   if (!state.user) return renderAuth(state);
   await refreshMeta();
   renderShell();
+  listenForSearch();
   window.addEventListener('hashchange', route);
   await route();
   const { call } = await api('/calls/pending');

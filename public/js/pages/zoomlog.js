@@ -1,6 +1,6 @@
 // Zoom call log: every Zoom Phone call in a period, straight from Zoom (not only calls dialed from the CRM),
 // with daily totals and a chart. Calls to a CRM lead's number link to that lead.
-import { api, busy, callStats, field, fill, fmt, h, icon, pageHead, plural, select, stat, toast } from '../ui.js';
+import { api, busy, callStats, field, fill, fmt, h, icon, pageHead, plural, reportTabs, select, stat, toast } from '../ui.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DAY_MS = 86_400_000;
@@ -119,6 +119,7 @@ export async function render(root, { query }, ctx, isCurrent) {
   if (!ctx.meta.zoomConfigured) {
     fill(root,
       pageHead('Zoom call log', 'Every Zoom Phone call, by day'),
+      reportTabs(ctx, 'zoom'),
       h('div', { class: 'card empty-state' }, 'Add your Zoom credentials (ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID and ZOOM_CLIENT_SECRET) to .env and restart the CRM to see Zoom calls here.'));
     return;
   }
@@ -214,6 +215,7 @@ function draw(root, ctx, view, data, isCurrent) {
 
   fill(root,
     pageHead('Zoom call log', subtitle, [refresh]),
+    reportTabs(ctx, 'zoom'),
     controls,
     beforeZoomHistory && h('div', { class: 'note' }, 'Zoom only keeps the last 6 months of call history, so earlier days show no calls.'),
     h('section', { class: `stats${cards.length === 3 ? ' cols-3' : ''}`, 'aria-label': 'Summary' }, cards),

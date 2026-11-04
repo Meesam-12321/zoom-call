@@ -1,19 +1,11 @@
 // Dashboard: call counts from Zoom (the same cards as the Zoom call log), meetings and outcomes from the CRM,
 // outcome breakdown, daily targets and pipeline totals.
-import { api, callStats, fill, exportButton, field, fmt, h, pageHead, select, stat } from '../ui.js';
+import { api, callStats, fill, exportButton, field, fmt, h, meter, pageHead, reportTabs, select, stat } from '../ui.js';
 
 const RANGES = [
   ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This week'], ['last_7_days', 'Last 7 days'],
   ['this_month', 'This month'], ['last_month', 'Last month'], ['last_30_days', 'Last 30 days'], ['custom', 'Custom range'],
 ];
-
-// Green means a daily target was reached, so only goals get it; an outcome that is 100% of the calls is just a share.
-function meter(value, target, { goal = true } = {}) {
-  const share = target ? Math.min(1, value / target) : 0;
-  const bar = h('div', {});
-  bar.style.width = `${Math.round(share * 100)}%`;
-  return h('div', { class: `meter${goal && target && value >= target ? ' done' : ''}`, role: 'img', 'aria-label': target ? `${value} of ${target}` : String(value) }, bar);
-}
 
 export async function render(root, { query }, ctx, isCurrent) {
   const state = {
@@ -50,6 +42,7 @@ export async function render(root, { query }, ctx, isCurrent) {
 
   fill(root,
     pageHead('Dashboard', `${RANGES.find(([key]) => key === report.range.preset)?.[1] || report.range.label} · ${period} · ${source}`, [exportButton(`/analytics/export?${params}`, 'Export report')]),
+    reportTabs(ctx, 'dashboard'),
     h('div', { class: 'toolbar' },
       field('Period', select(RANGES, state.range, { onchange: (event) => (event.target.value === 'custom' ? applyCustom() : go({ range: event.target.value, from: '', to: '' })) })),
       state.range === 'custom' && [field('From', fromInput), field('To', toInput)],
