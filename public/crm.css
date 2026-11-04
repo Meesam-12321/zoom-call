@@ -595,6 +595,11 @@ a.url {
   border-radius: var(--radius-sm);
 }
 
+/* Labels share a width, so numbers and the email address start in line. */
+.phone-row > .small {
+  min-width: 64px;
+}
+
 .phone-row .number {
   font-size: 16px;
   font-weight: 500;
@@ -1004,6 +1009,236 @@ details.extra dd {
   color: var(--muted);
 }
 
+/* ---------- inbox */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mail-list {
+  padding: 8px;
+}
+
+.mail-more {
+  padding: 8px 0;
+}
+
+.mail-more:has(> [hidden]) {
+  display: none;
+}
+
+/* Dot, sender, subject and date: one line a row, so a long inbox stays easy to scan. */
+.mail-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 224px) minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  min-height: 48px;
+  padding: 8px 16px;
+  color: var(--text-2);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.mail-row + .mail-row {
+  margin-top: 1px;
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.mail-row:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.mail-row.unread {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mail-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.unread > .mail-dot,
+.message-who .mail-dot {
+  background: var(--series);
+}
+
+.mail-who,
+.mail-subject {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.mail-clip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-who .count {
+  flex: none;
+  margin-left: 0;
+}
+
+.mail-subject .badge {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed columns, so paperclips stay in line whatever the date's length. */
+.mail-end {
+  display: grid;
+  grid-template-columns: 16px 128px;
+  gap: 8px;
+  align-items: center;
+  justify-items: end;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.mail-attached {
+  display: flex;
+}
+
+/* In a narrow card (a lead's Emails) the subject goes under the sender. */
+.compact .mail-row {
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 0 12px;
+  padding: 8px;
+}
+
+.compact .mail-subject {
+  grid-row: 2;
+  grid-column: 2 / -1;
+}
+
+.compact .mail-end {
+  grid-template-columns: auto auto;
+}
+
+.thread {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.message-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 16px;
+  width: 100%;
+  padding: 12px 16px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+}
+
+.message-head:hover {
+  background: var(--surface-hover);
+}
+
+.message-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.message-who strong {
+  font-weight: 600;
+}
+
+.message-date {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.message-line {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-body {
+  padding: 4px 16px 16px;
+}
+
+.message-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-frame {
+  display: block;
+  width: 100%;
+  height: 120px;
+  background: #fff;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.message-tools,
+.message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.message-tools:empty {
+  display: none;
+}
+
+.message-text + .message-tools {
+  margin-bottom: 8px;
+}
+
+/* Lines the button's text up with the message's left edge. */
+.message-tools .btn.ghost:first-child {
+  margin-left: -12px;
+}
+
+.attachment {
+  max-width: 100%;
+}
+
+.compose-from {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- sign-in */
 .auth-wrap {
   display: grid;
@@ -1078,5 +1313,20 @@ details.extra dd {
   .form-grid,
   .outcomes {
     grid-template-columns: 1fr;
+  }
+
+  .mail-row {
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    gap: 0 12px;
+    padding: 8px;
+  }
+
+  .mail-subject {
+    grid-row: 2;
+    grid-column: 2 / -1;
+  }
+
+  .mail-end {
+    grid-template-columns: auto auto;
   }
 }

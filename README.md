@@ -15,6 +15,7 @@ This is the **MVP** phase of the requirements document (Nov 3, 2026).
 | Pipeline | New → Attempted → Connected → Interested → Meeting booked → Demo done → Proposal sent → Won / Lost, plus Nurture. Shown as a drag-and-drop board and a list. Outcomes move leads forward automatically, and moving a lead to Lost asks for the reason. |
 | Tasks | Created automatically from outcomes. The **Today** page lists overdue tasks, tasks and callbacks due today, and leads never called. Callbacks get a reminder 10 minutes before. Each lead has an attempt counter, with a warning after 8 attempts (configurable). |
 | Call lists | Group leads into campaigns, such as "Florida flooring – batch 1", and go through them with the dialer: call, save the outcome, and the next lead loads. |
+| Email | The **Inbox** tab shows the Gmail account's full mailbox by conversation (Inbox, Sent, All mail, Gmail search), and you can read, reply and send from it. Every lead has an **Email** button, its page lists its conversations, and sent emails appear in its history. Admins only. |
 | Dashboard | Calls, calls picked up, connect rate, talk time, average call duration, conversations, outcome breakdown, meetings and meeting rate, daily target progress, and pipeline per stage. Filter by period, caller and call list, and export to Excel. |
 | Compliance | Do Not Call on contacts and companies, which blocks dialing. The "Do not call" outcome sets the flag permanently, and only an admin can clear it. There is a per-state recording-consent setting, user roles, sign-in and an activity log of every change. |
 
@@ -55,6 +56,17 @@ Never expose it to the internet without HTTPS.
 - **Logging:** the existing Server-to-Server OAuth app (scope `phone:read:list_call_logs:admin`) is enough. Every minute the server reads Zoom's call history and attaches each record to the CRM call that dialed it. A match is the same number, starting between a minute before and 10 minutes after the click.
 - **Embeddable dialer:** no extra Zoom plan or API access is needed for this MVP. Zoom's embeddable dialer (Smart Embed) is an option later, for calling inside the browser and detecting hang-up instantly. It needs a Marketplace app and an HTTPS domain.
 
+## Email
+
+Add the account to `.env` and restart: `GMAIL_USER` is the address and `GMAIL_APP_PASSWORD` is an [app password](https://myaccount.google.com/apppasswords) created on that same account. Both Gmail and Google Workspace work, and the password can be pasted with or without its spaces.
+
+- **Who can use it:** admins only, because it is the whole mailbox. Callers see no Inbox tab and no Email buttons.
+- **Live from Gmail:** nothing is copied into the CRM's database except a note in the lead's history (who, subject). Email sent from the CRM lands in Gmail's Sent folder, and replies stay in the same conversation.
+- **Read state:** opening a conversation marks it read in Gmail too. Just listing the mailbox changes nothing.
+- **Do Not Call:** emailing a lead marked Do Not Call asks for confirmation first, and the history notes that it was sent anyway.
+- **Safety:** anyone can send HTML to this mailbox, so each email is shown in a sandboxed frame where scripts and forms cannot run. Remote images stay off until you choose **Show images**, because loading them tells the sender you opened the email. Attachments are always downloaded, never opened in the page.
+- **The app password:** it can read and send all of this account's email, so it stays in `.env` (not in git). Anyone with that file has that access. To cut it off, revoke the password at the link above.
+
 ## How the dashboard numbers are calculated
 
 | Number | Definition |
@@ -85,6 +97,7 @@ On this page, Zoom can't tell a person from voicemail or a phone menu, so outgoi
 ## Not built yet
 
 - **Recording links.** Recording is off in this Zoom account, so there was nothing to test against. The call history shows "Recorded in Zoom" when Zoom reports a recording. Florida requires every party's consent to record. The per-state setting only reminds the caller on the call screen; the recording itself and any notice are Zoom settings.
+- **Email:** sending attachments, signatures, formatted (HTML) messages, and Spam and Trash folders. Sent email is plain text.
 - **V2:**
   - Calling: power-dial queue (callbacks first, then score), calling-hours guard, matching calls dialed outside the CRM.
   - Follow-up: cadences, post-call email templates, meeting booking.
@@ -96,6 +109,6 @@ On this page, Zoom can't tell a person from voicemail or a phone menu, so outgoi
 
 `npm run dev` restarts the server when code changes. `npm test` runs the tests.
 
-- `server/`: the Express API. `app.js` assembles it. `fields.js` lists the lead fields (the HV sheet's columns), `calling.js` handles calls, outcomes, tasks and lists, `leads.js` companies, contacts and the pipeline, `importer.js` Excel import, `sync.js` the Zoom sync, `zoomlog.js` the Zoom call log, and `analytics.js` the dashboard.
+- `server/`: the Express API. `app.js` assembles it. `fields.js` lists the lead fields (the HV sheet's columns), `calling.js` handles calls, outcomes, tasks and lists, `leads.js` companies, contacts and the pipeline, `importer.js` Excel import, `sync.js` the Zoom sync, `zoomlog.js` the Zoom call log, `gmail.js` and `mail.js` email, and `analytics.js` the dashboard.
 - `public/`: the browser app (plain JavaScript modules, no build step). Each page is in `public/js/pages/`.
 - `scripts/import.js`: the command-line import.

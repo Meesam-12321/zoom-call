@@ -1,6 +1,7 @@
 // Today: overdue tasks, callbacks and tasks due today, and leads never called, each one click away from a call.
 import { startCall } from '../call.js';
 import { bestPhone } from '../lead.js';
+import { emailButton } from '../mail.js';
 import { api, fill, badge, busy, empty, exportButton, field, fmt, h, icon, localInput, openModal, pageHead, select, tabs } from '../ui.js';
 
 export async function render(root, { query }, ctx, isCurrent) {
@@ -74,6 +75,7 @@ function taskRow(ctx, t, { onChange, showDate, showLead }) {
     type: 'button',
     onclick: () => callLead(ctx, { contactId: t.contact_id, companyId: t.company_id, phone }),
   }, icon('phone', 14), 'Call');
+  const email = t.type === 'email' && emailButton(ctx, hasContact ? { contactId: t.contact_id } : { companyId: t.company_id }, { small: true });
 
   return h('tr', {},
     h('td', { class: 'time' }, showDate ? fmt.dateTime(t.due_at) : fmt.time(t.due_at), late && h('div', {}, badge('Late', 'warn'))),
@@ -84,7 +86,7 @@ function taskRow(ctx, t, { onChange, showDate, showLead }) {
       h('a', { href: hasContact ? `#/contact/${t.contact_id}` : `#/company/${t.company_id}` }, hasContact ? fmt.name(t) : t.company_name),
       h('div', { class: 'sub' }, [hasContact && t.company_name, phone && fmt.phone(phone), t.time_zone && fmt.localTime(t.time_zone)].filter(Boolean).join(' · '))),
     ctx.isAdmin && h('td', {}, t.user_name || '—'),
-    h('td', { class: 'actions' }, h('div', { class: 'row end' }, open ? [call, reschedule, done] : reopen)));
+    h('td', { class: 'actions' }, h('div', { class: 'row end' }, open ? [call, email, reschedule, done] : reopen)));
 }
 
 function rescheduleDialog(ctx, task, onChange) {

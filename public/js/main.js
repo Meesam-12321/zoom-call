@@ -3,6 +3,7 @@ import { showOutcome } from './call.js';
 import { renderAuth } from './pages/auth.js';
 import * as dashboard from './pages/dashboard.js';
 import * as importer from './pages/import.js';
+import * as inbox from './pages/inbox.js';
 import * as leads from './pages/leads.js';
 import * as lists from './pages/lists.js';
 import * as pipeline from './pages/pipeline.js';
@@ -21,6 +22,8 @@ const ROUTES = {
   lists: lists.renderLists,
   list: lists.renderList,
   dial: lists.renderDialer,
+  inbox: inbox.render,
+  thread: inbox.renderThread,
   dashboard: dashboard.render,
   import: importer.render,
   zoom: zoomlog.render,
@@ -33,12 +36,13 @@ const NAV = [
   ['leads', 'Leads', 'leads'],
   ['pipeline', 'Pipeline', 'pipeline'],
   ['lists', 'Call lists', 'lists'],
+  ['inbox', 'Inbox', 'inbox', true],
   ['dashboard', 'Dashboard', 'dashboard'],
   ['zoom', 'Zoom call log', 'zoom'],
   ['import', 'Import', 'import', true],
   ['settings', 'Settings', 'settings'],
 ];
-const ACTIVE = { company: 'leads', contact: 'leads', list: 'lists', dial: 'lists' };
+const ACTIVE = { company: 'leads', contact: 'leads', list: 'lists', dial: 'lists', thread: 'inbox' };
 
 const ctx = {
   meta: null,

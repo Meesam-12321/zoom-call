@@ -2,6 +2,7 @@
 import express from 'express';
 import { checkPassword, hashPassword, requireAdmin } from './auth.js';
 import { DEFAULT_SETTINGS, nowIso } from './db.js';
+import { mailAddress } from './gmail.js';
 import {
   COMPANY_FIELDS, CONTACT_FIELDS, DISPOSITION_ACTIONS, LOST_REASONS, ROLE_TYPES, STAGES, TASK_TYPES,
 } from './fields.js';
@@ -79,6 +80,7 @@ export function adminRoutes(store) {
       unassignedLeads: store.get('SELECT COUNT(*) AS n FROM companies WHERE owner_id IS NULL').n,
       settings,
       zoomConfigured: Boolean(process.env.ZOOM_ACCOUNT_ID && process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET),
+      mailAddress: req.user.role === 'admin' ? mailAddress() : null,
     });
   });
 

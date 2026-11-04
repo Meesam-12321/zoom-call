@@ -1,4 +1,5 @@
 // The lead panel: who the caller is talking to, their numbers, local time, research note, script and history.
+import { canEmail, emailButton, emailLink } from './mail.js';
 import { badge, fmt, h, icon, outcomeBadge, stageBadge } from './ui.js';
 
 /** Callable numbers for a lead, best first (the contact's own lines, then the store / HQ line). */
@@ -94,7 +95,7 @@ export function taskList(ctx, tasks) {
 }
 
 /** `activity: false` leaves out open tasks and recent calls, for pages that show them in their own cards. */
-export function leadPanel(ctx, detail, { onCall, compact = false, activity = true } = {}) {
+export function leadPanel(ctx, detail, { onCall, onEmailSent, compact = false, activity = true } = {}) {
   const { contact, company, deal, calls = [], tasks = [], invalid = [] } = detail;
   const blocked = Boolean(contact?.do_not_call || company.do_not_call);
   const max = ctx.meta.settings.max_attempts;
@@ -130,7 +131,7 @@ export function leadPanel(ctx, detail, { onCall, compact = false, activity = tru
       company.priority && kv(label('priority'), company.priority),
       company.opening_hours && kv(label('opening_hours'), company.opening_hours),
       website && kv(label('website'), h('a', { href: website.href, target: '_blank', rel: 'noopener noreferrer' }, website.host.replace(/^www\./, '')), { full: website.href }),
-      email && kv(contact?.email ? 'Email' : label('email'), h('a', { href: `mailto:${email}` }, email), { full: email }),
+      email && !canEmail(ctx) && kv(contact?.email ? 'Email' : label('email'), emailLink(ctx, email), { full: email }),
       kv('Last called', fmt.ago(contact ? contact.last_called_at : calls[0]?.started_at))),
     h('div', { class: 'phones' }, phones.length
       ? phones.map((p) => {
@@ -141,7 +142,11 @@ export function leadPanel(ctx, detail, { onCall, compact = false, activity = tru
           wrong && badge('Wrong number', 'missed'),
           onCall && h('button', { class: 'btn call', type: 'button', disabled: blocked || wrong, onclick: () => onCall(p.e164) }, icon('phone'), 'Call'));
       })
-      : h('p', { class: 'muted' }, 'No phone number on file.')),
+      : h('p', { class: 'muted' }, 'No phone number on file.'),
+      canEmail(ctx) && h('div', { class: 'phone-row' },
+        h('span', { class: 'muted small' }, 'Email'),
+        h('span', { class: `number${email ? '' : ' muted'}` }, email || 'Not on file'),
+        emailButton(ctx, contact ? { contactId: contact.id } : { companyId: company.id }, { onSent: onEmailSent }))),
     company.key_people && block(label('key_people'), h('p', { class: 'text' }, company.key_people)),
     contact?.notes && block(fieldLabel(ctx.meta.contactFields, 'notes'), h('div', { class: 'note-box' }, contact.notes)),
     company.evidence_notes && block(label('evidence_notes'), h('p', { class: 'text' }, company.evidence_notes)),

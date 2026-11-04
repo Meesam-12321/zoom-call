@@ -1,6 +1,7 @@
 // Company and contact pages: lead panel with calling, contacts, call history, tasks, pipeline, details and history.
 import { startCall } from '../call.js';
 import { bestPhone, callTimeline, leadPanel, phonesOf, urlLinks } from '../lead.js';
+import { canEmail, emailButton, emailLink, threadRow } from '../mail.js';
 import {
   api, badge, busy, confirmDialog, field, fill, fmt, h, icon, localInput, outcomeBadge, pageHead, select, toast,
 } from '../ui.js';
@@ -35,7 +36,7 @@ function displayValue(ctx, key, value) {
     const links = urlLinks(value);
     return links.length ? h('div', { class: 'url-list' }, links) : String(value);
   }
-  if (key === 'email') return h('a', { class: 'url', href: `mailto:${value}`, title: value }, value);
+  if (key === 'email') return emailLink(ctx, value, { class: 'url', title: value });
   if (key === 'state') return ctx.meta.states[value] || value;
   if (key === 'time_zone') return `${ZONES.find(([zone]) => zone === value)?.[1] || value} (${fmt.zoneName(value)})`;
   if (key === 'role_type') return Object.fromEntries(ctx.meta.roleTypes)[value] || value;
@@ -145,6 +146,34 @@ function callsCard(ctx, calls) {
   return panel('Calls', calls.length, calls.length ? callTimeline(ctx, calls) : h('p', { class: 'muted' }, 'No calls yet.'));
 }
 
+// Gmail's search takes a few seconds to find a message that was just sent.
+const SEARCH_LAG_MS = 5000;
+let emailSentAt = 0;
+
+// Conversations with the lead, straight from the mailbox. Filled in after the page shows, so Gmail never slows it down.
+function emailsCard(ctx, lead) {
+  if (!canEmail(ctx)) return null;
+  const count = h('span', { class: 'count', hidden: true });
+  const body = h('div', {}, h('p', { class: 'muted' }, 'Loading emails…'));
+  const load = () => api(`/mail/lead-threads?${new URLSearchParams(lead)}`)
+    .then(({ threads, addresses }) => {
+      count.textContent = threads.length;
+      count.hidden = !threads.length;
+      fill(body, threads.length
+        ? h('div', { class: 'mail-rows compact' }, threads.map((thread) => threadRow(thread, location.hash)))
+        : h('p', { class: 'muted' }, addresses.length ? 'No emails with this lead yet.' : 'No email address on file.'));
+    })
+    .catch((error) => fill(body, h('p', { class: 'muted' }, error.message)));
+  load();
+  // Only this card refreshes later: reloading the page would wipe anything typed on it in the meantime.
+  if (Date.now() - emailSentAt < SEARCH_LAG_MS) {
+    setTimeout(() => {
+      if (body.isConnected) load();
+    }, SEARCH_LAG_MS);
+  }
+  return h('section', { class: 'card panel' }, h('div', { class: 'panel-head' }, h('h2', {}, 'Emails', count)), body);
+}
+
 function tasksCard(ctx, detail, { contactId, companyId, onChange }) {
   const open = detail.tasks.filter((t) => t.status === 'open' && (!contactId || !t.contact_id || t.contact_id === contactId));
   const type = select(ctx.meta.taskTypes, 'call');
@@ -195,6 +224,8 @@ function describe(ctx, entry) {
       return `Marked Do Not Call${d.via ? ` (outcome "${d.via}")` : ''}`;
     case 'do_not_call_cleared':
       return 'Do Not Call removed';
+    case 'email_sent':
+      return `Email sent to ${(d.to || []).join(', ')}${d.subject ? `: "${d.subject}"` : ''}${d.do_not_call_override ? ' (despite Do Not Call)' : ''}`;
     default:
       return `${what} ${entry.action.replace(/_/g, ' ')}`;
   }
@@ -262,6 +293,10 @@ export async function renderContact(root, { id }, ctx, isCurrent) {
   const { contact, company } = detail;
   const reload = () => ctx.rerender();
   const colleagues = detail.contacts.filter((c) => c.id !== contact.id);
+  const afterEmail = () => {
+    emailSentAt = Date.now();
+    reload();
+  };
 
   root.replaceChildren(
     pageHead(fmt.name(contact), [contact.job_title, company.name].filter(Boolean).join(' · '), [
@@ -270,9 +305,10 @@ export async function renderContact(root, { id }, ctx, isCurrent) {
     ], ['Leads', '#/leads?view=contacts']),
     h('div', { class: 'split' },
       h('div', { class: 'stack' },
-        leadPanel(ctx, detail, { activity: false, onCall: (phone) => startCall(ctx, { contactId: contact.id, phone, onDone: reload }) }),
+        leadPanel(ctx, detail, { activity: false, onEmailSent: afterEmail, onCall: (phone) => startCall(ctx, { contactId: contact.id, phone, onDone: reload }) }),
         wrongNumbersCard(detail, reload),
         callsCard(ctx, detail.calls),
+        emailsCard(ctx, { contactId: contact.id }),
         tasksCard(ctx, detail, { contactId: contact.id, companyId: company.id, onChange: reload }),
         historyCard(ctx, detail.activity)),
       h('div', { class: 'stack' },
@@ -294,6 +330,10 @@ export async function renderCompany(root, { id }, ctx, isCurrent) {
   if (!isCurrent()) return;
   const { company, contacts } = detail;
   const reload = () => ctx.rerender();
+  const afterEmail = () => {
+    emailSentAt = Date.now();
+    reload();
+  };
   const max = ctx.meta.settings.max_attempts;
 
   const contactsTable = contacts.length
@@ -307,12 +347,14 @@ export async function renderCompany(root, { id }, ctx, isCurrent) {
           h('td', { class: 'number' }, phone ? fmt.phone(phone) : '—', c.do_not_call ? h('div', {}, badge('Do Not Call', 'missed')) : null),
           h('td', {}, c.last_disposition ? outcomeBadge(ctx, c.last_disposition) : h('span', { class: 'muted' }, 'Never called')),
           h('td', { class: 'num' }, c.attempts >= max ? badge(`${c.attempts}/${max}`, 'missed') : c.attempts),
-          h('td', { class: 'actions' }, phone && h('button', {
-            class: 'btn small call',
-            type: 'button',
-            disabled: blocked,
-            onclick: () => startCall(ctx, { contactId: c.id, phone, onDone: reload }),
-          }, icon('phone', 14), 'Call')));
+          h('td', { class: 'actions' }, h('div', { class: 'row end nowrap' },
+            emailButton(ctx, { contactId: c.id }, { small: true, onSent: afterEmail }),
+            phone && h('button', {
+              class: 'btn small call',
+              type: 'button',
+              disabled: blocked,
+              onclick: () => startCall(ctx, { contactId: c.id, phone, onDone: reload }),
+            }, icon('phone', 14), 'Call'))));
       }))))
     : h('p', { class: 'muted' }, 'No contacts yet.');
 
@@ -323,11 +365,12 @@ export async function renderCompany(root, { id }, ctx, isCurrent) {
     ], ['Leads', '#/leads?view=companies']),
     h('div', { class: 'split' },
       h('div', { class: 'stack' },
-        leadPanel(ctx, { ...detail, contact: null }, { activity: false, onCall: (phone) => startCall(ctx, { companyId: company.id, phone, onDone: reload }) }),
+        leadPanel(ctx, { ...detail, contact: null }, { activity: false, onEmailSent: afterEmail, onCall: (phone) => startCall(ctx, { companyId: company.id, phone, onDone: reload }) }),
         wrongNumbersCard(detail, reload),
         panel('Contacts', contacts.length, contactsTable,
           h('div', { class: 'row end section-gap' }, h('button', { class: 'btn small secondary', type: 'button', onclick: () => newContactDialog(ctx, company.id) }, icon('plus', 14), 'Add contact'))),
         callsCard(ctx, detail.calls),
+        emailsCard(ctx, { companyId: company.id }),
         tasksCard(ctx, detail, { companyId: company.id, onChange: reload }),
         historyCard(ctx, detail.activity)),
       h('div', { class: 'stack' },

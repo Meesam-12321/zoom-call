@@ -1,6 +1,7 @@
 // Leads: search and filter contacts or companies, call them, add them to call lists, assign owners, export to Excel.
 import { startCall } from '../call.js';
 import { bestPhone, fieldLabel } from '../lead.js';
+import { emailButton } from '../mail.js';
 import {
   api, badge, busy, debounce, fill, empty, exportButton, field, fmt, h, icon, openModal, outcomeBadge, pageHead, select, stageBadge, tabs, toast,
 } from '../ui.js';
@@ -163,7 +164,7 @@ function contactsTable(ctx, rows, selected, onSelect) {
         h('td', { class: 'number' }, phone ? fmt.phone(phone) : '—', blocked && h('div', {}, badge('Do Not Call', 'missed'))),
         lastOutcomeCell(ctx, c, `${c.attempts} of ${max} attempts`),
         ctx.isAdmin && h('td', {}, c.owner_name || h('span', { class: 'muted' }, 'Unassigned')),
-        h('td', { class: 'actions' }, callButton(ctx, { contactId: c.id, phone, blocked })));
+        h('td', { class: 'actions' }, h('div', { class: 'row end nowrap' }, emailButton(ctx, { contactId: c.id }, { small: true }), callButton(ctx, { contactId: c.id, phone, blocked }))));
     }))));
 }
 
@@ -181,7 +182,7 @@ function companiesTable(ctx, rows, selected, onSelect) {
       h('td', {}, c.stage && stageBadge(ctx, c.stage)),
       lastOutcomeCell(ctx, c),
       ctx.isAdmin && h('td', {}, c.owner_name || h('span', { class: 'muted' }, 'Unassigned')),
-      h('td', { class: 'actions' }, callButton(ctx, { companyId: c.id, phone: c.hq_phone_e164, blocked: Boolean(c.do_not_call) })))))));
+      h('td', { class: 'actions' }, h('div', { class: 'row end nowrap' }, emailButton(ctx, { companyId: c.id }, { small: true }), callButton(ctx, { companyId: c.id, phone: c.hq_phone_e164, blocked: Boolean(c.do_not_call) }))))))));
 }
 
 function pager({ total, page, pageSize }, go) {
