@@ -1,6 +1,6 @@
 // Zoom call log: every Zoom Phone call in a period, straight from Zoom (not only calls dialed from the CRM),
 // with daily totals and a chart. Calls to a CRM lead's number link to that lead.
-import { api, busy, field, fill, fmt, h, icon, pageHead, select, toast } from '../ui.js';
+import { api, busy, callStats, field, fill, fmt, h, icon, pageHead, plural, select, stat, toast } from '../ui.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const DAY_MS = 86_400_000;
@@ -19,7 +19,6 @@ const isDayKey = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || '') && !Number.i
 
 const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const decimal = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-const plural = (n, word) => `${fmt.num(n)} ${word}${n === 1 ? '' : 's'}`;
 
 function zoneOptions(business) {
   return [
@@ -132,8 +131,6 @@ export async function render(root, { query }, ctx, isCurrent) {
   if (isCurrent()) draw(root, ctx, view, data, isCurrent);
 }
 
-const stat = (label, value, sub) => h('div', { class: 'card stat' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value), h('div', { class: 'stat-sub' }, sub));
-
 function draw(root, ctx, view, data, isCurrent) {
   const { range, summary: s, days, calls, fetchedAt, beforeZoomHistory, minConnectedSeconds } = data;
   const business = ctx.meta.settings.business_tz;
@@ -204,24 +201,12 @@ function draw(root, ctx, view, data, isCurrent) {
     view.period === 'custom' && [field('From', fromInput), field('To', toInput)],
     field('Time zone', select(zoneOptions(business), view.tz, { onchange: (event) => go({ tz: event.target.value }) })));
 
-  // ---------- summary
-  const talk = stat('Total talk time', fmt.span(s.talkTime), `Across ${plural(s.connected, 'connected call')}`);
-  const avg = stat('Average call duration', s.connected ? fmt.span(s.avgDuration) : '—', s.connected ? `Per connected call · longest ${fmt.clock(s.longestDuration)}` : 'No connected calls');
-  const cards = singleDay
-    ? [
-      stat('Calls', fmt.num(s.totalCalls), s.totalCalls ? `${fmt.num(s.connected)} connected · ${fmt.num(s.notConnected)} not connected` : 'No calls on this day'),
-      stat('Connection rate', s.totalCalls ? fmt.pct(s.connected / s.totalCalls) : '—', s.totalCalls ? `${fmt.num(s.connected)} of ${plural(s.totalCalls, 'call')} connected` : 'No calls on this day'),
-      talk,
-      avg,
-    ]
-    : [
-      stat('Total calls', fmt.num(s.totalCalls), `${fmt.num(s.connected)} connected · ${fmt.num(s.notConnected)} not connected`),
-      stat('Average calls per day', decimal.format(s.avgPerDay), s.activeDays
-        ? `${plural(s.days, 'day')} in range · ${decimal.format(s.avgPerActiveDay)}/day on the ${plural(s.activeDays, 'day')} with calls`
-        : `${plural(s.days, 'day')} in range`),
-      talk,
-      avg,
-    ];
+  // ---------- summary: "Connected calls: 70 of 103" in one card, the same cards the Dashboard shows
+  const [connected, talk, avg] = callStats(s, singleDay ? 'No calls on this day' : 'No calls in this period');
+  const perDay = stat('Average calls per day', decimal.format(s.avgPerDay), s.activeDays
+    ? `${plural(s.days, 'day')} in range · ${decimal.format(s.avgPerActiveDay)}/day on the ${plural(s.activeDays, 'day')} with calls`
+    : `${plural(s.days, 'day')} in range`);
+  const cards = singleDay ? [connected, talk, avg] : [connected, perDay, talk, avg];
 
   const tip = h('div', { class: 'tooltip', hidden: true });
   const chartBox = h('div', { class: 'chart' });
@@ -231,7 +216,7 @@ function draw(root, ctx, view, data, isCurrent) {
     pageHead('Zoom call log', subtitle, [refresh]),
     controls,
     beforeZoomHistory && h('div', { class: 'note' }, 'Zoom only keeps the last 6 months of call history, so earlier days show no calls.'),
-    h('section', { class: 'stats', 'aria-label': 'Summary' }, cards),
+    h('section', { class: `stats${cards.length === 3 ? ' cols-3' : ''}`, 'aria-label': 'Summary' }, cards),
     days.length > 1 && h('section', { class: 'card panel' },
       h('div', { class: 'panel-head' }, h('h2', {}, 'Calls per day'), h('span', { class: 'muted' }, `Average ${decimal.format(s.avgPerDay)} calls per day`)),
       chartBox),

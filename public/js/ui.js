@@ -227,6 +227,25 @@ export function pageHead(title, subtitle, actions = [], crumb) {
     h('div', { class: 'row' }, actions));
 }
 
+export const plural = (n, word) => `${fmt.num(n)} ${word}${n === 1 ? '' : 's'}`;
+
+export const stat = (label, value, sub) =>
+  h('div', { class: 'card stat' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value), h('div', { class: 'stat-sub' }, sub));
+
+/**
+ * The call cards the Zoom call log and the Dashboard share, so both pages show the same numbers in the same words.
+ * `s` is a summary with totalCalls, connected, notConnected, talkTime, avgDuration and longestDuration.
+ */
+export function callStats(s, emptyText = 'No calls in this period') {
+  return [
+    stat('Connected calls',
+      [fmt.num(s.connected), s.totalCalls ? h('span', { class: 'stat-of' }, ` of ${fmt.num(s.totalCalls)}`) : null],
+      s.totalCalls ? `${fmt.pct(s.connected / s.totalCalls)} connection rate · ${fmt.num(s.notConnected)} not connected` : emptyText),
+    stat('Total talk time', fmt.span(s.talkTime), `Across ${plural(s.connected, 'connected call')}`),
+    stat('Average call duration', s.connected ? fmt.span(s.avgDuration) : '—', s.connected ? `Per connected call · longest ${fmt.clock(s.longestDuration)}` : 'No connected calls'),
+  ];
+}
+
 export function tabs(items, active, onChange) {
   return h('div', { class: 'tabs', role: 'tablist' },
     items.map(([key, label]) => h('button', { class: `tab${key === active ? ' active' : ''}`, type: 'button', role: 'tab', 'aria-selected': String(key === active), onclick: () => onChange(key) }, label)));

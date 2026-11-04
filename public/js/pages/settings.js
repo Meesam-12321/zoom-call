@@ -70,7 +70,7 @@ const TABS = {
       }),
     }, 'Save outcomes');
     return panel('Call outcomes',
-      h('p', { class: 'muted' }, 'Every call must end with one of these. "Connected" outcomes count as calls picked up by a person. Outcomes used on past calls can be switched off but not deleted.'),
+      h('p', { class: 'muted' }, 'Every call dialed from the CRM must end with one of these. "Connected" means a person answered, and moves the lead to the Connected stage. (The Dashboard counts connected calls from Zoom, like the Zoom call log.) Outcomes used on past calls can be switched off but not deleted.'),
       h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
         h('thead', {}, h('tr', {}, h('th', {}, 'Outcome'), h('th', {}, 'Counts as'), h('th', {}, 'What happens next'), h('th', {}, 'Days'), h('th', {}, 'Task name'), h('th', {}, 'Active'), h('th', {}))),
         body)),

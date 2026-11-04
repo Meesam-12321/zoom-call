@@ -16,7 +16,7 @@ This is the **MVP** phase of the requirements document (Nov 3, 2026).
 | Tasks | Created automatically from outcomes. The **Today** page lists overdue tasks, tasks and callbacks due today, and leads never called. Callbacks get a reminder 10 minutes before. Each lead has an attempt counter, with a warning after 8 attempts (configurable). |
 | Call lists | Group leads into campaigns, such as "Florida flooring – batch 1", and go through them with the dialer: call, save the outcome, and the next lead loads. |
 | Email | The **Inbox** tab shows the Gmail account's full mailbox by conversation (Inbox, Sent, All mail, Gmail search), and you can read, reply and send from it. Every lead has an **Email** button, its page lists its conversations, and sent emails appear in its history. Admins only. |
-| Dashboard | Calls, calls picked up, connect rate, talk time, average call duration, conversations, outcome breakdown, meetings and meeting rate, daily target progress, and pipeline per stage. Filter by period, caller and call list, and export to Excel. |
+| Dashboard | Connected calls out of all calls, connection rate, talk time, average call duration, conversations, outcome breakdown, meetings and meeting rate, daily target progress, and pipeline per stage. Call numbers come from Zoom and match the Zoom call log. Filter by period, caller and call list, and export to Excel. |
 | Compliance | Do Not Call on contacts and companies, which blocks dialing. The "Do not call" outcome sets the flag permanently, and only an admin can clear it. There is a per-state recording-consent setting, user roles, sign-in and an activity log of every change. |
 
 ## First run
@@ -69,15 +69,22 @@ Add the account to `.env` and restart: `GMAIL_USER` is the address and `GMAIL_AP
 
 ## How the dashboard numbers are calculated
 
+The call numbers come from Zoom's call history, the same records and the same rules as the **Zoom call log** page, so for the same period and time zone the two pages always show the same figures. That includes calls you dialed in Zoom itself, not only with the CRM's Call button. Outcomes and meetings come from what callers saved in the CRM, so a call dialed outside the CRM counts as a call but has no outcome yet.
+
 | Number | Definition |
 |---|---|
-| Total calls | Calls dialed from the CRM |
-| Calls picked up | Calls whose outcome counts as connected, meaning a person answered |
-| Connect rate | Picked up ÷ total calls |
-| Total talk time | Sum of Zoom call durations |
-| Average call duration | Zoom duration of connected calls ÷ connected calls that have Zoom data |
+| Total calls | Every Zoom Phone call in the period, outgoing and incoming |
+| Connected calls | Zoom says the line was answered and, for outgoing calls, it lasted at least 10 seconds (see below) |
+| Connection rate | Connected ÷ total calls |
+| Total talk time | Sum of the durations of connected calls |
+| Average call duration | Total talk time ÷ connected calls |
 | Conversations | Connected calls longer than 60 seconds (configurable) |
-| Meetings booked / meeting rate | Positive outcomes with "meeting booked" / meetings ÷ conversations |
+| Meetings booked / meeting rate | Positive outcomes saved with "meeting booked" / meetings ÷ conversations |
+| Outcomes | The outcome saved for each call. Calls with none show as "Outcome not saved yet" |
+
+- **Caller filter:** a call belongs to the caller who dialed it from the CRM, or else to the caller whose CRM email is the Zoom user's email. Callers only ever see their own calls. Daily targets work the same way, so keep each caller's CRM email the same as their Zoom email.
+- **Call list filter:** only calls to numbers of leads in that list.
+- **No Zoom:** if Zoom is not set up or cannot be reached, the Dashboard says so and counts only the calls dialed from the CRM, with "connected" taken from the outcome the caller saved.
 
 Days and "today" use the business time zone (Settings → Calling rules, default US Eastern). Callback times are entered in the **lead's** local time.
 
@@ -85,7 +92,7 @@ Days and "today" use the business time zone (Settings → Calling rules, default
 
 **Zoom call log** in the sidebar lists every Zoom Phone call by day, straight from Zoom, including calls made outside the CRM. It shows totals, a calls-per-day chart and a daily summary for any day or range, and a call to a lead's number links to that lead. The old `/calls.html` address opens this page.
 
-On this page, Zoom can't tell a person from voicemail or a phone menu, so outgoing calls under 10 seconds count as "Not connected". Change this with `MIN_CONNECTED_SECONDS` in `.env`; `0` uses Zoom's result as is.
+Zoom can't tell a person from voicemail or a phone menu, so outgoing calls under 10 seconds count as "Not connected", on this page and on the Dashboard. Change this with `MIN_CONNECTED_SECONDS` in `.env`; `0` uses Zoom's result as is. The first card reads "Connected calls: 70 of 103", with the connection rate and the number not connected beneath it.
 
 ## Data, backups and security
 
