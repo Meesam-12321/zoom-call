@@ -4,8 +4,13 @@
 const DAY_MS = 86_400_000;
 export const HISTORY_DAYS = 182;
 const WINDOW_DAYS = 30;
+const CACHE_MS = 60_000;
 
 export class ZoomError extends Error {}
+
+export const configured = () => Boolean(process.env.ZOOM_ACCOUNT_ID && process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET);
+
+const history = new Map();
 
 let token = null;
 let pendingToken = null;
@@ -101,4 +106,22 @@ export async function fetchCallHistory(from, to) {
     } while (nextPageToken);
   }
   return [...records.values()];
+}
+
+/**
+ * Call history for a resolved range ({ from, to } dates), kept for a minute. The Zoom call log and the Dashboard both read it
+ * from here, so they always count the very same records. Zoom keeps six months, so anything older is left out.
+ */
+export async function callHistory(range, { refresh = false } = {}) {
+  const now = Date.now();
+  const key = `${range.from.toISOString()}|${range.to.toISOString()}`;
+  let entry = history.get(key);
+  if (!entry || refresh || now - entry.at > CACHE_MS) {
+    const start = Math.max(range.from.getTime(), now - HISTORY_DAYS * DAY_MS);
+    const end = Math.min(range.to.getTime(), now);
+    entry = { at: now, items: end > start ? await fetchCallHistory(new Date(start), new Date(end)) : [] };
+    history.set(key, entry);
+    if (history.size > 50) history.delete(history.keys().next().value);
+  }
+  return entry;
 }

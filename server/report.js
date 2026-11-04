@@ -8,6 +8,12 @@ export const ANSWERED = new Set(['answered', 'accepted', 'picked_up', 'connected
 // seconds of being answered therefore count as not connected. MIN_CONNECTED_SECONDS in .env overrides it.
 export const DEFAULT_MIN_CONNECTED_SECONDS = 10;
 
+/** MIN_CONNECTED_SECONDS from .env when it is a number of 0 or more, else the default. */
+export function configuredMinSeconds(env = process.env) {
+  const setting = Number(env.MIN_CONNECTED_SECONDS || NaN);
+  return setting >= 0 ? setting : DEFAULT_MIN_CONNECTED_SECONDS;
+}
+
 const RESULT_LABELS = {
   answered: 'Answered',
   accepted: 'Accepted',
@@ -64,13 +70,14 @@ export function normalizeCall(item, minConnectedSeconds = DEFAULT_MIN_CONNECTED_
  *  - talk time      = sum of durations of connected calls
  *  - avg duration   = talk time ÷ connected calls
  *  - avg calls/day  = all calls ÷ calendar days in the range (days without calls count as 0)
+ * `keep` optionally narrows the calls (the Dashboard uses it for one caller or call list); the numbers are still worked out here.
  */
-export function buildReport(items, range, { minConnectedSeconds = DEFAULT_MIN_CONNECTED_SECONDS } = {}) {
+export function buildReport(items, range, { minConnectedSeconds = DEFAULT_MIN_CONNECTED_SECONDS, keep = () => true } = {}) {
   const from = range.from.getTime();
   const to = range.to.getTime();
   const calls = items
     .map((item) => normalizeCall(item, minConnectedSeconds))
-    .filter((c) => c && c.start >= from && c.start < to)
+    .filter((c) => c && c.start >= from && c.start < to && keep(c))
     .sort((a, b) => b.start - a.start);
 
   const byDay = new Map();

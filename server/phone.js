@@ -29,6 +29,9 @@ export function toE164(value) {
   return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
 }
 
+/** A number as Zoom reports it (+18135551234, which must match exactly), else read the way the importer reads numbers. */
+export const asE164 = (number) => (/^\+\d{8,15}$/.test(number || '') ? number : toE164(number));
+
 export function formatPhone(e164) {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164 || '');
   return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : e164 || '';

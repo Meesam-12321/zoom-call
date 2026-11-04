@@ -9,6 +9,7 @@ import {
 import { STATES, clean } from './phone.js';
 import { HttpError } from './records.js';
 import { isValidTimeZone } from './time.js';
+import { configured as zoomConfigured } from './zoom.js';
 
 const ACTION_KEYS = new Set(DISPOSITION_ACTIONS.map(([key]) => key));
 const int = (value, min, max) => {
@@ -79,7 +80,7 @@ export function adminRoutes(store) {
       areas: store.all('SELECT DISTINCT area FROM companies WHERE area IS NOT NULL ORDER BY area').map((row) => row.area),
       unassignedLeads: store.get('SELECT COUNT(*) AS n FROM companies WHERE owner_id IS NULL').n,
       settings,
-      zoomConfigured: Boolean(process.env.ZOOM_ACCOUNT_ID && process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET),
+      zoomConfigured: zoomConfigured(),
       mailAddress: req.user.role === 'admin' ? mailAddress() : null,
     });
   });

@@ -162,7 +162,7 @@ test('import, calling, outcomes, visibility, Zoom matching and the dashboard', a
   assert.deepEqual({ ...store.get('SELECT duration, ring_time, answered FROM calls WHERE id = ?', call.id) }, { duration: 95, ring_time: 7, answered: 1 });
 
   const { summary } = await caller('/analytics?range=today');
-  assert.deepEqual([summary.totalCalls, summary.pickedUp, summary.conversations, summary.meetings], [2, 2, 1, 1]);
+  assert.deepEqual([summary.totalCalls, summary.connected, summary.conversations, summary.meetings], [2, 2, 1, 1]);
 
   // Do Not Call on the store's main line blocks the company and marks the lead lost.
   const third = await caller('/calls/start', { method: 'POST', body: { contactId: ashlie.id, phone: ashlie.hq_phone_e164 } });

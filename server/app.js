@@ -10,7 +10,7 @@ import { importRoutes } from './importer.js';
 import { leadRoutes } from './leads.js';
 import { mailRoutes } from './mail.js';
 import { HttpError } from './records.js';
-import { ZoomError } from './zoom.js';
+import * as zoomApi from './zoom.js';
 import { zoomLogRoutes } from './zoomlog.js';
 
 const publicDir = path.resolve(import.meta.dirname, '..', 'public');
@@ -31,7 +31,7 @@ const SECURITY_HEADERS = {
   ].join('; '),
 };
 
-export function createApp(store, { setupCode = null, mail = gmail } = {}) {
+export function createApp(store, { setupCode = null, mail = gmail, zoom = zoomApi } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -55,15 +55,15 @@ export function createApp(store, { setupCode = null, mail = gmail } = {}) {
     callingRoutes(store),
     adminRoutes(store),
     importRoutes(store),
-    analyticsRoutes(store),
-    zoomLogRoutes(store),
+    analyticsRoutes(store, zoom),
+    zoomLogRoutes(store, zoom),
     mailRoutes(store, mail),
   );
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 
   app.use((err, req, res, next) => {
     if (err.type === 'entity.too.large') return res.status(413).json({ error: 'That file is too large (25 MB at most).' });
-    const status = err instanceof HttpError ? err.status : err instanceof RangeError ? 400 : err instanceof ZoomError || err instanceof gmail.MailError ? 502 : 500;
+    const status = err instanceof HttpError ? err.status : err instanceof RangeError ? 400 : err instanceof zoomApi.ZoomError || err instanceof gmail.MailError ? 502 : 500;
     if (status === 500) console.error(err);
     res.status(status).json({ error: status === 500 ? 'Unexpected server error. Check the terminal for details.' : err.message, ...err.data });
   });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildReport, normalizeCall } from '../server/report.js';
+import { buildReport, configuredMinSeconds, normalizeCall } from '../server/report.js';
 import { resolveRange } from '../server/time.js';
 
 let seq = 0;
@@ -86,6 +86,25 @@ test('short outgoing calls are not connected, because voicemail and phone menus 
   const inbound = normalizeCall(call({ direction: 'inbound', call_result: 'answered', duration: 4 }));
   assert.equal(inbound.connected, true, 'Zoom knows when you answered an incoming call');
   assert.equal(normalizeCall(call({ call_result: 'hang_up', duration: 0 })).ringTime, null);
+});
+
+test('narrowing the calls with keep changes every total, not just the list', () => {
+  const range = resolveRange({ preset: 'last_7_days', tz: 'UTC', now: NOW });
+  const mine = call({ duration: 80, caller_name: 'Me' });
+  const report = buildReport([mine, call({ duration: 20 }), call({ call_result: 'hang_up', duration: 0 })], range, { keep: (c) => c.id === mine.call_history_uuid });
+  assert.deepEqual(
+    [report.summary.totalCalls, report.summary.connected, report.summary.notConnected, report.summary.talkTime, report.summary.avgDuration],
+    [1, 1, 0, 80, 80],
+  );
+  assert.equal(report.days.find((d) => d.day === '2026-11-02').calls, 1);
+});
+
+test('the connection cutoff comes from .env, and falls back to 10 seconds', () => {
+  assert.equal(configuredMinSeconds({}), 10);
+  assert.equal(configuredMinSeconds({ MIN_CONNECTED_SECONDS: '' }), 10);
+  assert.equal(configuredMinSeconds({ MIN_CONNECTED_SECONDS: 'soon' }), 10);
+  assert.equal(configuredMinSeconds({ MIN_CONNECTED_SECONDS: '0' }), 0, '0 keeps Zoom’s own result');
+  assert.equal(configuredMinSeconds({ MIN_CONNECTED_SECONDS: '15' }), 15);
 });
 
 test('short outgoing calls are left out of talk time and averages', () => {
