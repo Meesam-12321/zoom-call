@@ -128,6 +128,57 @@ test('the conversation outcome reaches existing databases once, and stays off if
   again.db.close();
 });
 
+test('"hung up" is an outcome of its own: not connected, retried in 2 days, and the lead stays Attempted', async () => {
+  const order = store.all('SELECT key FROM dispositions ORDER BY position, label').map((d) => d.key);
+  assert.deepEqual(order.slice(0, 4), ['no_answer', 'voicemail', 'hung_up', 'gatekeeper'], 'it sits among the calls that did not get through');
+
+  const lead = await newLead();
+  const { task, stage } = await log(admin, lead, { disposition: 'hung_up', notes: 'Hung up.' });
+  assert.equal(task.title, 'Retry call');
+  assert.ok(Math.abs(Date.parse(task.due_at) - (Date.now() + 2 * DAY)) < MINUTE, 'the retry is due in 2 days');
+  assert.deepEqual([stage.from, stage.to], ['new', 'attempted']);
+  assert.equal((await row(lead)).last_disposition, 'hung_up');
+});
+
+test('the hung up outcome reaches existing databases once, and stays off if an admin removes it', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'crm-')), 'crm.db');
+  const old = new Store(file);
+  old.run("DELETE FROM dispositions WHERE key = 'hung_up'");
+  old.db.close();
+  const upgraded = new Store(file);
+  assert.deepEqual({ ...upgraded.get("SELECT label, connected, action, retry_days, active FROM dispositions WHERE key = 'hung_up'") },
+    { label: 'Hung up', connected: 0, action: 'retry', retry_days: 2, active: 1 });
+  upgraded.run("UPDATE dispositions SET active = 0 WHERE key = 'hung_up'");
+  upgraded.db.close();
+  const again = new Store(file);
+  assert.equal(again.get("SELECT active FROM dispositions WHERE key = 'hung_up'").active, 0);
+  assert.equal(again.get("SELECT COUNT(*) AS n FROM dispositions WHERE key = 'hung_up'").n, 1);
+  again.db.close();
+});
+
+test("fixing a contact's name and email while calling shows in the call log and in History", async () => {
+  const lead = await newLead();
+  const { call } = await log(admin, lead, { disposition: 'conversation', notes: 'Spoke to the owner.' });
+
+  await admin(`/contacts/${lead.contactId}`, { method: 'PATCH', body: { first_name: 'Mike', last_name: 'Stone', email: 'Mike@Stone-Floors.com' } });
+  const detail = await admin(`/contacts/${lead.contactId}`);
+  assert.equal(detail.contact.email, 'mike@stone-floors.com');
+  const logged = detail.calls.find((c) => c.id === call.id);
+  assert.deepEqual([logged.first_name, logged.last_name], ['Mike', 'Stone'], 'the call that was already logged now names the right person');
+  const edit = detail.activity.find((a) => a.entity === 'contact' && a.action === 'updated');
+  assert.deepEqual(edit.details.first_name, ['Pat', 'Mike']);
+  assert.deepEqual(edit.details.email, [null, 'mike@stone-floors.com']);
+
+  await admin(`/contacts/${lead.contactId}`, { method: 'PATCH', expect: 400, body: { email: 'not an email' } });
+  await admin(`/contacts/${lead.contactId}`, { method: 'PATCH', expect: 400, body: { first_name: '', last_name: '' } });
+  assert.equal((await admin(`/contacts/${lead.contactId}`)).contact.first_name, 'Mike', 'a rejected edit changes nothing');
+
+  // A call to a store with nobody on file edits the store's own name and email.
+  await admin(`/companies/${lead.companyId}`, { method: 'PATCH', body: { name: 'Stone Floors', email: 'hello@stone-floors.com' } });
+  const company = (await admin(`/companies/${lead.companyId}`)).company;
+  assert.deepEqual([company.name, company.email], ['Stone Floors', 'hello@stone-floors.com']);
+});
+
 test('asked to call back in 2 days: a reminder is set, fires once, and snoozing makes it fire again', async () => {
   const lead = await newLead();
   const inTwoDays = Date.now() + 2 * DAY;

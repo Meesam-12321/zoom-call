@@ -38,6 +38,19 @@ const { companies, contacts, list } = result;
 console.log(`Mapping: ${preset}`);
 console.log(`Companies: ${companies.created} created, ${companies.merged} merged, ${companies.skipped} skipped`);
 console.log(`Contacts: ${contacts.created} created, ${contacts.merged} merged, ${contacts.skipped} skipped, ${contacts.unmatched} without a company`);
+
+// Rows that repeat a lead already in the CRM are flagged, not added twice: merged into it, or skipped when only a shared
+// email or number matches under a different name. Each line says what matched and where the existing lead came from.
+const flagged = report.duplicates;
+if (flagged.length) {
+  console.log(`Potential duplicates: ${report.companies.duplicates + report.contacts.duplicates} (none were added twice)`);
+  for (const d of flagged.slice(0, 20)) {
+    const matched = d.existing.matched.map((m) => `${m.label}: ${m.value}`).join(', ');
+    const from = d.existing.file ? `from ${d.existing.file}` : 'added by hand';
+    console.log(`  ${d.kind} "${d.label}" matches "${d.existing.label}" on ${matched} (${from}): ${d.suggested === 'skip' ? 'skipped' : 'merged'}`);
+  }
+  if (flagged.length > 20) console.log(`  ...and ${flagged.length - 20} more`);
+}
 const problems = Object.entries(report.issueCounts).filter(([, n]) => n).map(([kind, n]) => `${n} ${kind.replace(/_/g, ' ')}`);
 console.log(`Problems: ${problems.length ? problems.join(', ') : 'none'}`);
 if (list) console.log(`Call list: "${list.name}"`);

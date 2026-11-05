@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS companies (
   owner_id INTEGER REFERENCES users (id) ON DELETE SET NULL,
   do_not_call INTEGER NOT NULL DEFAULT 0,
   dnc_at TEXT,
+  source TEXT,
   extra TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -56,6 +57,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   attempts INTEGER NOT NULL DEFAULT 0,
   last_called_at TEXT,
   last_disposition TEXT,
+  source TEXT,
   extra TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -179,10 +181,20 @@ CREATE INDEX IF NOT EXISTS activity_entity ON activity (entity, entity_id);
 `;
 
 // Columns added after the first release; databases created before then get them on start.
+// `source` is the file a record was imported from (empty for records typed into the CRM).
 const ADDED_COLUMNS = {
-  companies: ['department', 'revenue', 'area', 'opening_hours', 'facebook_url', 'instagram_url', 'evidence_notes', 'key_people', 'contacts_listed', 'source_urls'],
-  contacts: ['management_level', 'employment_status', 'current_address', 'email_type', 'source_urls'],
+  companies: ['department', 'revenue', 'area', 'opening_hours', 'facebook_url', 'instagram_url', 'evidence_notes', 'key_people', 'contacts_listed', 'source_urls', 'source'],
+  contacts: ['management_level', 'employment_status', 'current_address', 'email_type', 'source_urls', 'source'],
 };
+
+// Records imported before sources were tracked: the file name is in the log entry that closes their import
+// (an import runs in one transaction, so the first "import completed" entry after a record's own entry is its import).
+const backfillSource = (table, entity) => `
+  UPDATE ${table} SET source = (
+    SELECT json_extract(done.details, '$.file') FROM activity made, activity done
+    WHERE made.entity = '${entity}' AND made.entity_id = ${table}.id AND made.action = 'imported'
+      AND done.id = (SELECT MIN(id) FROM activity WHERE entity = 'import' AND action = 'completed' AND id > made.id)
+    LIMIT 1)`;
 
 export const DEFAULT_SETTINGS = {
   max_attempts: 8,
@@ -211,7 +223,11 @@ export class Store {
     this.db.exec(SCHEMA);
     for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
       const existing = new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
-      for (const column of columns) if (!existing.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+      for (const column of columns) {
+        if (existing.has(column)) continue;
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+        if (column === 'source') this.db.exec(backfillSource(table, table === 'companies' ? 'company' : 'contact'));
+      }
     }
     this.db.exec('CREATE INDEX IF NOT EXISTS companies_area ON companies (area)');
     this.statements = new Map();
@@ -219,9 +235,12 @@ export class Store {
     if (!this.get('SELECT 1 FROM dispositions LIMIT 1')) {
       DEFAULT_DISPOSITIONS.forEach((d, i) => this.insert('dispositions', { ...d, position: i }));
     }
-    // Added after the first release. An outcome an admin removes stays in the table switched off, so this adds it only once.
-    if (!this.get("SELECT 1 FROM dispositions WHERE key = 'conversation'")) {
-      this.insert('dispositions', { ...DEFAULT_DISPOSITIONS.find((d) => d.key === 'conversation'), position: 3 });
+    // Outcomes added after the first release, with the place each takes in the list. An outcome an admin removes stays in
+    // the table switched off, so each is added only once (and one an admin made with the same name is left alone).
+    for (const [key, position] of [['conversation', 3], ['hung_up', 2]]) {
+      if (!this.get('SELECT 1 FROM dispositions WHERE key = ?', key)) {
+        this.insert('dispositions', { ...DEFAULT_DISPOSITIONS.find((d) => d.key === key), position });
+      }
     }
   }
 

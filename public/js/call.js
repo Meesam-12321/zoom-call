@@ -43,9 +43,10 @@ export async function startCall(ctx, { contactId, companyId, phone, listId, onDo
 export async function showOutcome(ctx, call, { onDone } = {}) {
   if (outcomeOpen) return;
   outcomeOpen = true;
+  const leadUrl = call.contact_id ? `/contacts/${call.contact_id}` : `/companies/${call.company_id}`;
   let detail;
   try {
-    detail = await api(call.contact_id ? `/contacts/${call.contact_id}` : `/companies/${call.company_id}`);
+    detail = await api(leadUrl);
   } catch (error) {
     outcomeOpen = false;
     toast(error.message, { kind: 'error' });
@@ -56,6 +57,19 @@ export async function showOutcome(ctx, call, { onDone } = {}) {
   const form = callForm(ctx, tz);
 
   let modal;
+  // The caller can fix the lead's name or email while on the call. The panel (and the script, which greets them by first name)
+  // is drawn again from what was saved, and the dialog's heading follows.
+  const titleFor = (d) => `Call outcome · ${d.contact ? fmt.name(d.contact) : d.company.name}`;
+  const panelFor = (d) => leadPanel(ctx, d, { compact: true, onEdit: refreshLead });
+  let panel = panelFor(detail);
+  async function refreshLead() {
+    detail = await api(leadUrl);
+    const next = panelFor(detail);
+    panel.replaceWith(next);
+    panel = next;
+    modal.setTitle(titleFor(detail));
+  }
+
   const finish = () => {
     outcomeOpen = false;
     modal.close();
@@ -94,11 +108,11 @@ export async function showOutcome(ctx, call, { onDone } = {}) {
   }, "Didn't call · discard");
 
   modal = openModal({
-    title: `Call outcome · ${detail.contact ? fmt.name(detail.contact) : detail.company.name}`,
+    title: titleFor(detail),
     wide: true,
     dismissable: false,
     body: h('div', { class: 'call-grid' },
-      leadPanel(ctx, detail, { compact: true }),
+      panel,
       h('div', {},
         h('div', { class: 'dialing' },
           icon('phone'),

@@ -118,13 +118,14 @@ function changesBetween(existing, cols) {
 
 const visibleChanges = (changes) => Object.fromEntries(Object.entries(changes).filter(([key]) => !DERIVED.has(key)));
 
-export function createCompany(store, userId, cols, { ownerId = null, extra = {}, action = 'created' } = {}) {
+// `source` is the file an import created the record from; it stays null for records typed in by hand.
+export function createCompany(store, userId, cols, { ownerId = null, extra = {}, action = 'created', source = null } = {}) {
   if (!cols.name) throw new HttpError(400, 'Company name is required.');
   const time = nowIso();
   const timeZone = cols.time_zone || guessTimeZone({ state: cols.state, city: cols.city, phone: cols.hq_phone_e164 });
-  const id = store.insert('companies', { ...cols, time_zone: timeZone, owner_id: ownerId, extra: JSON.stringify(extra), created_at: time, updated_at: time });
+  const id = store.insert('companies', { ...cols, time_zone: timeZone, owner_id: ownerId, source, extra: JSON.stringify(extra), created_at: time, updated_at: time });
   store.insert('deals', { company_id: id, stage: 'new', updated_at: time });
-  store.log(userId, 'company', id, action, { name: cols.name });
+  store.log(userId, 'company', id, action, { name: cols.name, ...(source && { file: source }) });
   return id;
 }
 
@@ -142,10 +143,10 @@ export function updateCompany(store, userId, existing, cols, { action = 'updated
   return changes;
 }
 
-export function createContact(store, userId, companyId, cols, { extra = {}, action = 'created' } = {}) {
+export function createContact(store, userId, companyId, cols, { extra = {}, action = 'created', source = null } = {}) {
   const time = nowIso();
-  const id = store.insert('contacts', { role_type: 'other', ...cols, company_id: companyId, extra: JSON.stringify(extra), created_at: time, updated_at: time });
-  store.log(userId, 'contact', id, action, { name: contactName(cols) });
+  const id = store.insert('contacts', { role_type: 'other', ...cols, company_id: companyId, source, extra: JSON.stringify(extra), created_at: time, updated_at: time });
+  store.log(userId, 'contact', id, action, { name: contactName(cols), ...(source && { file: source }) });
   return id;
 }
 

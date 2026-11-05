@@ -1,6 +1,7 @@
 // Recording what happened on a call: quick templates, the outcome, a note and a reminder.
 // The form is shared by the dialog after the Call button and by "Log call", for calls dialed by hand in Zoom.
 import { phonesOf } from './lead.js';
+import { nameEmailEdit } from './leadedit.js';
 import { api, busy, field, fill, fmt, h, icon, localInput, openModal, select, toast } from './ui.js';
 
 const DAY = 86_400_000;
@@ -10,6 +11,7 @@ const QUARTER_HOUR = 900_000;
 const TEMPLATES = [
   { label: "Didn't pick up", outcome: 'no_answer', note: "Didn't pick up." },
   { label: 'Left a voicemail', outcome: 'voicemail', note: 'Left a voicemail.' },
+  { label: 'Hung up', outcome: 'hung_up', note: 'Hung up.' },
   { label: 'Had a conversation', outcome: 'conversation', note: 'Had a conversation.' },
   { label: 'Call back tomorrow', outcome: 'callback', note: 'Asked to call back tomorrow.', days: 1 },
   { label: 'Call back in 2 days', outcome: 'callback', note: 'Asked to call back in 2 days.', days: 2 },
@@ -188,14 +190,15 @@ const zoomLabel = (z) => [fmt.ago(z.start_time), fmt.phone(z.number), z.duration
 
 /** Records a call dialed outside the CRM. `zoom` preselects one of Zoom's records for it. */
 export async function logCallDialog(ctx, { contactId, companyId, listId, zoom, onDone }) {
+  const leadUrl = contactId ? `/contacts/${contactId}` : `/companies/${companyId}`;
   let detail;
   try {
-    detail = await api(contactId ? `/contacts/${contactId}` : `/companies/${companyId}`);
+    detail = await api(leadUrl);
   } catch (error) {
     toast(error.message, { kind: 'error' });
     return;
   }
-  const { contact, company } = detail;
+  let { contact, company } = detail;
   const tz = company.time_zone || ctx.meta.settings.business_tz;
   const phones = phonesOf(contact, company);
   const known = detail.zoomCalls || [];
@@ -213,6 +216,23 @@ export async function logCallDialog(ctx, { contactId, companyId, listId, zoom, o
     if (phoneField) phoneField.hidden = Boolean(whichCall?.value);
   };
   showPhone();
+
+  // The caller can fix the lead's name or email here too; the heading and the summary line follow.
+  const title = () => `Log a call · ${contact ? fmt.name(contact) : company.name}`;
+  const summary = () => [contact && company.name, !whichCall && !phone && phones[0] && fmt.phone(phones[0].e164), company.time_zone && `Their time: ${fmt.localTime(company.time_zone)}`].filter(Boolean).join(' · ');
+  const who = h('p', { class: 'muted' }, summary());
+  const editBox = h('div', {});
+  const drawEdit = () => {
+    const edit = nameEmailEdit(detail, async () => {
+      detail = await api(leadUrl);
+      ({ contact, company } = detail);
+      who.textContent = summary();
+      modal.setTitle(title());
+      drawEdit();
+    });
+    fill(editBox, edit.button, edit.editor);
+  };
+  drawEdit();
 
   const save = h('button', {
     class: 'btn',
@@ -235,9 +255,10 @@ export async function logCallDialog(ctx, { contactId, companyId, listId, zoom, o
   }, icon('check'), 'Save call');
 
   const modal = openModal({
-    title: `Log a call · ${contact ? fmt.name(contact) : company.name}`,
+    title: title(),
     body: h('div', { class: 'stack' },
-      h('p', { class: 'muted' }, [contact && company.name, !whichCall && !phone && phones[0] && fmt.phone(phones[0].e164), company.time_zone && `Their time: ${fmt.localTime(company.time_zone)}`].filter(Boolean).join(' · ')),
+      who,
+      editBox,
       whichCall && field('Which call was it?', whichCall, 'From your Zoom history.'),
       phoneField,
       !whichCall && ctx.meta.zoomConfigured && h('p', { class: 'muted small' }, 'Zoom can take a few minutes to list a call. Save now, and it will be matched automatically.'),

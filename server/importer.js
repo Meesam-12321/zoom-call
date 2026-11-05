@@ -1,9 +1,12 @@
 // Excel/CSV import: upload → map columns (HV template, saved presets or automatic) → validation report and
 // duplicate decisions → import. Contacts are linked to companies by company name.
+// A row that matches a record already in the CRM is flagged as a potential duplicate (which fields match, and which file
+// that record came from) and is never created a second time unless someone chooses "create anyway".
 import crypto from 'node:crypto';
 import express from 'express';
 import { requireAdmin } from './auth.js';
 import { nowIso } from './db.js';
+import { matchCompany, matchContact } from './duplicates.js';
 import { readWorkbook } from './excel.js';
 import { COMPANY_FIELDS, CONTACT_FIELDS } from './fields.js';
 import { clean, cleanText, extractEmail } from './phone.js';
@@ -296,8 +299,11 @@ function buildRecords(upload, config) {
   return { companies, contacts, issues, mergedRows };
 }
 
-/** Links contacts to companies and finds existing CRM records that each row duplicates. */
-function analyze(store, built) {
+/** What to do with a row by default: a match is merged into the existing record, or skipped when the evidence is weak; it is never created again. */
+const suggest = (match) => (!match ? 'create' : match.weak ? 'skip' : 'merge');
+
+/** Links contacts to companies and finds the existing CRM records that each row duplicates (`filename` is the file being imported). */
+function analyze(store, built, filename) {
   const issue = (sheet, row, kind, text) => built.issues.push({ sheet, row, kind, text });
   const companyByKey = (key) => store.get('SELECT id, name, hq_phone_e164 FROM companies WHERE name_key = ? ORDER BY id LIMIT 1', key);
 
@@ -308,11 +314,8 @@ function analyze(store, built) {
   }
 
   for (const rec of built.companies.values()) {
-    const byName = companyByKey(rec.key);
-    const byPhone = !byName && rec.cols.hq_phone_e164
-      && store.get('SELECT id, name FROM companies WHERE hq_phone_e164 = ? ORDER BY id LIMIT 1', rec.cols.hq_phone_e164);
-    rec.match = byName ? { id: byName.id, label: byName.name, by: 'company name' } : byPhone ? { id: byPhone.id, label: byPhone.name, by: 'HQ phone number' } : null;
-    rec.suggested = rec.match?.by === 'company name' ? 'merge' : 'create';
+    rec.match = matchCompany(store, rec.cols, filename);
+    rec.suggested = suggest(rec.match);
     rec.ref = `company:${rec.key}`;
     if (!rec.cols.hq_phone_e164) issue(rec.sheet, rec.row, 'missing_phone', `${rec.cols.name}: no valid HQ phone number`);
   }
@@ -323,8 +326,11 @@ function analyze(store, built) {
     c.inFile = Boolean(fileCompany);
     c.companyId = dbCompany?.id ?? null;
     c.ref = `contact:${c.sheet}:${c.row}`;
+    c.match = matchContact(store, c.cols, fileCompany?.match?.id ?? dbCompany?.id ?? null, filename);
+    c.suggested = suggest(c.match);
     const label = contactName(c.cols);
-    if (!fileCompany && !dbCompany) {
+    // A contact that is already in the CRM doesn't need its company to be found: nothing is created for it.
+    if (!fileCompany && !dbCompany && !c.match) {
       issue(c.sheet, c.row, 'unmatched_company', c.companyName
         ? `${label}: company "${c.companyName}" is not in the file or the CRM`
         : `${label}: no company name`);
@@ -333,32 +339,11 @@ function analyze(store, built) {
     if (!c.cols.mobile_e164 && !c.cols.direct_e164 && !companyPhone) {
       issue(c.sheet, c.row, 'missing_phone', `${label}: no phone number for the contact or the company`);
     }
-
-    const knownCompanyId = fileCompany?.match?.id ?? dbCompany?.id ?? null;
-    const phones = [c.cols.mobile_e164, c.cols.direct_e164].filter(Boolean);
-    let match = null;
-    let by = null;
-    if (c.cols.email) {
-      match = store.get('SELECT id FROM contacts WHERE email = ? COLLATE NOCASE ORDER BY id LIMIT 1', c.cols.email);
-      by = 'email';
-    }
-    if (!match && phones.length) {
-      const [a, b = a] = phones;
-      match = store.get('SELECT id FROM contacts WHERE mobile_e164 IN (?, ?) OR direct_e164 IN (?, ?) ORDER BY id LIMIT 1', a, b, a, b);
-      by = 'phone number';
-    }
-    if (!match && knownCompanyId) {
-      match = store.get(
-        `SELECT id FROM contacts WHERE company_id = ? AND lower(coalesce(first_name, '')) = ? AND lower(coalesce(last_name, '')) = ? ORDER BY id LIMIT 1`,
-        knownCompanyId, (c.cols.first_name || '').toLowerCase(), (c.cols.last_name || '').toLowerCase(),
-      );
-      by = 'name and company';
-    }
-    const existing = match && store.get('SELECT ct.*, co.name AS company_name FROM contacts ct JOIN companies co ON co.id = ct.company_id WHERE ct.id = ?', match.id);
-    c.match = existing ? { id: existing.id, label: `${contactName(existing)} · ${existing.company_name}`, by } : null;
-    c.suggested = 'merge';
   }
 }
+
+// Duplicates worth a look come first: weak matches, then rows matching other uploads, then rows already synced from this same file.
+const urgency = (d) => (d.existing.weak ? 0 : d.existing.sameFile ? 2 : 1);
 
 function report(built) {
   const companies = [...built.companies.values()];
@@ -369,17 +354,21 @@ function report(built) {
       total: built.contacts.length,
       new: built.contacts.filter((c) => !c.match).length,
       duplicates: built.contacts.filter((c) => c.match).length,
-      unmatched: built.contacts.filter((c) => !c.inFile && !c.companyId).length,
+      unmatched: built.contacts.filter((c) => !c.match && !c.inFile && !c.companyId).length,
     },
     mergedRows: built.mergedRows,
     issueCounts: Object.fromEntries(kinds.map((kind) => [kind, built.issues.filter((i) => i.kind === kind).length])),
     issues: built.issues.slice(0, 500),
+    // `existing` is the record in the CRM: its id and label, the fields that match (with the shared values), whether the match
+    // is weak, and where the record came from (file, date, call lists).
     duplicates: [
-      ...companies.filter((c) => c.match).map((c) => ({ ref: c.ref, kind: 'company', label: c.cols.name, existing: c.match, suggested: c.suggested })),
-      ...built.contacts.filter((c) => c.match).map((c) => ({
-        ref: c.ref, kind: 'contact', label: `${contactName(c.cols)} · ${c.companyName || 'no company'}`, existing: c.match, suggested: c.suggested,
+      ...companies.filter((c) => c.match).map((c) => ({
+        ref: c.ref, kind: 'company', label: c.cols.name, sheet: c.sheet, row: c.row, existing: c.match, suggested: c.suggested,
       })),
-    ].slice(0, 1000),
+      ...built.contacts.filter((c) => c.match).map((c) => ({
+        ref: c.ref, kind: 'contact', label: `${contactName(c.cols)} · ${c.companyName || 'no company'}`, sheet: c.sheet, row: c.row, existing: c.match, suggested: c.suggested,
+      })),
+    ].sort((a, b) => urgency(a) - urgency(b)).slice(0, 1000),
   };
 }
 
@@ -387,12 +376,17 @@ function commit(store, user, built, { decisions, ownerId, listName, createMissin
   return store.tx(() => {
     const result = { companies: { created: 0, merged: 0, skipped: 0 }, contacts: { created: 0, merged: 0, skipped: 0, unmatched: 0 }, list: null };
     const decide = (rec) => (rec.match ? (['skip', 'merge', 'create'].includes(decisions[rec.ref]) ? decisions[rec.ref] : rec.suggested) : 'create');
+    // The existing record keeps a note of the later file that repeated it, what matched and what was done about it.
+    const flag = (entity, rec, decision) => store.log(user.id, entity, rec.match.id, 'duplicate in import', {
+      file: filename, sheet: rec.sheet, row: rec.row, matched: rec.match.matched.map((m) => m.label).join(', '), result: decision,
+    });
     const companyIds = new Map();
 
     for (const rec of built.companies.values()) {
       const decision = decide(rec);
+      if (rec.match) flag('company', rec, decision);
       if (decision === 'create') {
-        companyIds.set(rec.key, createCompany(store, user.id, rec.cols, { ownerId, extra: rec.extra, action: 'imported' }));
+        companyIds.set(rec.key, createCompany(store, user.id, rec.cols, { ownerId, extra: rec.extra, action: 'imported', source: filename }));
         result.companies.created++;
         continue;
       }
@@ -411,23 +405,26 @@ function commit(store, user, built, { decisions, ownerId, listName, createMissin
 
     const listContactIds = [];
     for (const c of built.contacts) {
+      const decision = decide(c);
+      if (c.match) flag('contact', c, decision);
+      // A contact merged into (or skipped for) a contact already in the CRM keeps that contact's company.
+      const existingContact = c.match && decision !== 'create';
       let companyId = (c.companyKey && companyIds.get(c.companyKey)) || c.companyId;
-      if (!companyId && createMissingCompanies && c.companyName) {
-        companyId = createCompany(store, user.id, { ...c.companyCols, name: c.companyName, name_key: c.companyKey }, { ownerId, action: 'imported' });
+      if (!companyId && !existingContact && createMissingCompanies && c.companyName) {
+        companyId = createCompany(store, user.id, { ...c.companyCols, name: c.companyName, name_key: c.companyKey }, { ownerId, action: 'imported', source: filename });
         companyIds.set(c.companyKey, companyId);
         result.companies.created++;
       }
-      if (!companyId) {
+      if (!companyId && !existingContact) {
         result.contacts.unmatched++;
         continue;
       }
-      if (!c.inFile && Object.keys(c.companyCols).length) {
+      if (companyId && !c.inFile && Object.keys(c.companyCols).length) {
         const company = store.get('SELECT * FROM companies WHERE id = ?', companyId);
         updateCompany(store, user.id, company, blanksOnly(company, c.companyCols), { action: 'merged from import' });
       }
-      const decision = decide(c);
       if (decision === 'create') {
-        listContactIds.push(createContact(store, user.id, companyId, c.cols, { extra: c.extra, action: 'imported' }));
+        listContactIds.push(createContact(store, user.id, companyId, c.cols, { extra: c.extra, action: 'imported', source: filename }));
         result.contacts.created++;
       } else if (decision === 'merge') {
         const existing = store.get('SELECT * FROM contacts WHERE id = ?', c.match.id);
@@ -462,7 +459,7 @@ export async function importWorkbook(store, user, buffer, filename, { ownerId = 
   const upload = { filename, sheets };
   const preset = matchPreset(store, sheets);
   const built = buildRecords(upload, validConfig(upload, configFor(sheets, preset)));
-  analyze(store, built);
+  analyze(store, built, filename);
   const checked = report(built);
   const result = commit(store, user, built, { decisions: {}, ownerId, listName, createMissingCompanies, filename });
   return { preset: preset?.name ?? 'automatic matching', report: checked, result };
@@ -505,14 +502,14 @@ export function importRoutes(store) {
   r.post('/import/check', (req, res) => {
     const upload = getUpload(req.body.token);
     const built = buildRecords(upload, validConfig(upload, req.body.config));
-    analyze(store, built);
+    analyze(store, built, upload.filename);
     res.json(report(built));
   });
 
   r.post('/import/commit', (req, res) => {
     const upload = getUpload(req.body.token);
     const built = buildRecords(upload, validConfig(upload, req.body.config));
-    analyze(store, built);
+    analyze(store, built, upload.filename);
     const ownerId = Number(req.body.ownerId) || null;
     if (ownerId && !store.get('SELECT 1 FROM users WHERE id = ? AND active = 1', ownerId)) throw new HttpError(400, 'Unknown user.');
     const result = commit(store, req.user, built, {

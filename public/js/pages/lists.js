@@ -2,7 +2,9 @@
 import { startCall } from '../call.js';
 import { canEditNote, noteDialog, snoozeButton } from '../followup.js';
 import { bestPhone, leadPanel } from '../lead.js';
+import { editLeadDialog } from '../leadedit.js';
 import { logCallDialog } from '../logcall.js';
+import { sheetListDialog } from '../newlist.js';
 import {
   api, badge, busy, confirmDialog, empty, exportButton, field, fill, fmt, h, icon, meter, openModal, outcomeBadge, pageHead, stageBadge, toast,
 } from '../ui.js';
@@ -30,6 +32,8 @@ export async function renderLists(root, params, ctx, isCurrent) {
   if (!isCurrent()) return;
   root.replaceChildren(
     pageHead('Call lists', 'Group leads into campaigns and dial through them one by one.', [
+      // Importing is for admins, so the upload is too.
+      ctx.isAdmin && h('button', { class: 'btn secondary', type: 'button', onclick: () => sheetListDialog(ctx) }, icon('sheet'), 'New list from Excel'),
       h('button', { class: 'btn', type: 'button', onclick: () => newListDialog(ctx) }, icon('plus'), 'New list'),
     ]),
     lists.length
@@ -47,7 +51,9 @@ export async function renderLists(root, params, ctx, isCurrent) {
             h('a', { class: 'btn call', href: `#/dial/${l.id}` }, icon('play', 14), 'Start dialing'),
             h('a', { class: 'btn secondary', href: `#/list/${l.id}` }, 'Open list')));
       }))
-      : empty('No call lists yet. Importing a spreadsheet can create one, or use "New list".'),
+      : empty(ctx.isAdmin
+        ? 'No call lists yet. "New list from Excel" makes one from a spreadsheet, or use "New list" for an empty one.'
+        : 'No call lists yet. Use "New list" to make one.'),
   );
 }
 
@@ -56,7 +62,10 @@ const LIST_VIEWS = [
   ['note', 'Called in Zoom, no note', (c) => c.zoom],
   ['followup', 'Has a follow-up', (c) => c.task],
   ['never', 'Not called yet', (c) => !c.attempts && !c.zoom],
+  ['nophone', 'No phone number', (c) => !bestPhone(c, c)],
 ];
+// Views for things to put right: they only show up while some lead needs it.
+const FIX_VIEWS = new Set(['note', 'nophone']);
 
 /** Finds a lead by name, company or place, or by any part of a number however it is written. */
 function matchesSearch(c, text) {
@@ -117,8 +126,15 @@ export async function renderList(root, { id }, ctx, isCurrent) {
       h('td', { class: 'title-cell' },
         h('a', { href: `#/contact/${c.id}` }, fmt.name(c)),
         h('div', { class: 'sub' }, h('a', { class: 'plain', href: `#/company/${c.company_id}` }, c.company_name)),
-        h('div', { class: 'sub' }, [c.job_title, [c.city, c.state].filter(Boolean).join(', ')].filter(Boolean).join(' · '))),
-      h('td', { class: 'number' }, phone ? fmt.phone(phone) : '—', blocked && h('div', {}, badge('Do Not Call', 'missed')), c.stage && h('div', { class: 'row-gap' }, stageBadge(ctx, c.stage))),
+        h('div', { class: 'sub' }, [c.job_title, [c.city, c.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')),
+        h('button', {
+          class: 'link-btn',
+          type: 'button',
+          title: 'Change their name, email, phone numbers or company',
+          'aria-label': `Edit ${fmt.name(c)}`,
+          onclick: () => editLeadDialog({ contactId: c.id, onSaved: refresh }),
+        }, icon('note', 12), 'Edit')),
+      h('td', { class: 'number' }, phone ? fmt.phone(phone) : h('span', {}, '— ', badge('No number', 'warn')), blocked && h('div', {}, badge('Do Not Call', 'missed')), c.stage && h('div', { class: 'row-gap' }, stageBadge(ctx, c.stage))),
       lastCallCell(ctx, c, refresh),
       nextStepCell(ctx, c, refresh),
       h('td', { class: 'actions' }, h('div', { class: 'row end nowrap' },
@@ -151,7 +167,7 @@ export async function renderList(root, { id }, ctx, isCurrent) {
     subtitle.textContent = `${fmt.num(contacts.length)} leads · ${fmt.num(contacts.filter((c) => c.attempts).length)} with a logged call`;
     fill(chips, LIST_VIEWS.map(([key, label, test]) => {
       const count = contacts.filter(test).length;
-      if (key === 'note' && !count && state.view !== 'note') return null;
+      if (FIX_VIEWS.has(key) && !count && state.view !== key) return null;
       return h('button', {
         class: `chip${state.view === key ? ' on' : ''}`,
         type: 'button',
@@ -253,6 +269,7 @@ export async function renderDialer(root, { id }, ctx, isCurrent) {
       progressBar.replaceChildren(meter(counts.total - counts.remaining, counts.total, { goal: false }));
     }
     view.replaceChildren(leadPanel(ctx, detail, {
+      onEdit: () => show(contactId),
       onCall: (phone) => startCall(ctx, {
         contactId,
         phone,

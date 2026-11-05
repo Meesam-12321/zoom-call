@@ -1,5 +1,7 @@
 // Import & sync: drop a sheet, see what will change, sync. Re-syncing a remembered sheet takes one click.
-// New leads are added; leads already in the CRM only get their empty fields filled, so nothing callers entered is lost.
+// New leads are added. A row that matches a lead already in the CRM is flagged as a potential duplicate, with the fields that
+// match and the file the lead came from. It is merged (only empty fields are filled, so nothing callers entered is lost) or
+// skipped, and only created again if someone chooses "Create anyway".
 import { canRemember, forgetSheet, hasChanged, listSheets, pickSheet, readSheet, saveSheet } from '../sheets.js';
 import { api, badge, busy, exportButton, field, fill, fmt, h, icon, pageHead, select, stat, toast } from '../ui.js';
 
@@ -41,7 +43,7 @@ export async function render(root, params, ctx, isCurrent) {
   // ---------- step 1: choose a sheet
 
   async function showStart() {
-    setHead('Import & sync', 'Drop your sheet. New leads are added and existing leads get their empty fields filled in. Nothing your callers entered is overwritten.');
+    setHead('Import & sync', 'Drop your sheet. New leads are added. Leads already in the CRM are flagged as duplicates instead of being added twice, and nothing your callers entered is overwritten.');
     setStep(0);
     upload = report = source = null;
     decisions = {};
@@ -167,6 +169,8 @@ export async function render(root, params, ctx, isCurrent) {
       const sameSheets = saved && Object.keys(saved.sheets).sort().join() === Object.keys(upload.config.sheets).sort().join();
       config = sameSheets ? saved : upload.config;
       await recheck();
+      // Duplicates of other uploads, or under a different name, need a look. Rows already synced from this same file do not.
+      if (report.duplicates.some((d) => d.existing.weak || !d.existing.sameFile)) openFolds.add('duplicates');
       showReview();
     } catch (error) {
       toast(error.message, { kind: 'error' });
@@ -191,6 +195,7 @@ export async function render(root, params, ctx, isCurrent) {
       newContacts: report.contacts.new + count('contact', 'create') - (creating ? 0 : report.contacts.unmatched),
       updates: count('company', 'merge') + count('contact', 'merge'),
       skips: count('company', 'skip') + count('contact', 'skip'),
+      creates: count('company', 'create') + count('contact', 'create'),
     };
   }
 
@@ -199,9 +204,16 @@ export async function render(root, params, ctx, isCurrent) {
 
   const planLine = (p) => [
     p.newCompanies + p.newContacts ? `${fmt.num(p.newCompanies + p.newContacts)} new` : null,
-    p.updates ? `${fmt.num(p.updates)} already in the CRM` : null,
+    p.updates ? `${fmt.num(p.updates)} duplicates merged` : null,
     p.skips ? `${fmt.num(p.skips)} skipped` : null,
   ].filter(Boolean).join(' · ') || 'Nothing to change';
+
+  /** What the review will do with the flagged rows, e.g. "9 merged · 3 skipped". */
+  const duplicateLine = (p) => [
+    `${fmt.num(p.updates)} merged`,
+    `${fmt.num(p.skips)} skipped`,
+    p.creates ? `${fmt.num(p.creates)} created anyway` : null,
+  ].filter(Boolean).join(' · ');
 
   function fold(key, title, note, content) {
     return h('details', {
@@ -218,6 +230,7 @@ export async function render(root, params, ctx, isCurrent) {
     setStep(1);
     const c = report.companies;
     const p = report.contacts;
+    const flagged = c.duplicates + p.duplicates;
     const statBox = h('section', { class: 'stats', 'aria-label': 'What will change' });
     const action = h('span', { class: 'muted' });
     const go = h('button', { class: 'btn large', type: 'button', onclick: () => busy(go, sync) });
@@ -228,7 +241,7 @@ export async function render(root, params, ctx, isCurrent) {
       fill(statBox,
         stat('New companies', fmt.num(now.newCompanies), c.total ? `of ${fmt.num(c.total)} in the sheet` : now.creating ? 'Created from the contact rows' : 'None in this sheet'),
         stat('New contacts', fmt.num(now.newContacts), `of ${fmt.num(p.total)} in the sheet`),
-        stat('Already in the CRM', fmt.num(now.updates), 'Only their empty fields get filled in'),
+        stat('Potential duplicates', fmt.num(flagged), flagged ? duplicateLine(now) : 'None found'),
         stat('Problems', fmt.num(issueKinds.reduce((sum, [, n]) => sum + n, 0)), issueKinds.length ? issueKinds.map(([k, n]) => `${n} ${(ISSUE_LABELS[k] || k).toLowerCase()}`).join(' · ') : 'None found'));
       action.textContent = planLine(now);
       go.replaceChildren('Sync to CRM', h('span', { class: 'arrow' }, icon('arrow')));
@@ -242,7 +255,7 @@ export async function render(root, params, ctx, isCurrent) {
       report.mergedRows > 0 && h('div', { class: 'note' }, `${counted(report.mergedRows, 'row', 'rows')} repeated a company or contact in the file and were combined.`),
       options.card,
       fold('columns', 'Columns', upload.preset ? `Using the "${upload.preset.name}" mapping` : 'Matched by their names', columnsContent()),
-      report.duplicates.length > 0 && fold('duplicates', `Already in the CRM (${fmt.num(report.duplicates.length)})`, 'Choose per lead, or leave the suggestion', duplicatesContent(drawPlan)),
+      report.duplicates.length > 0 && fold('duplicates', `Potential duplicates (${fmt.num(flagged)})`, 'Nothing is added twice unless you choose Create anyway', duplicatesContent(drawPlan, flagged)),
       report.issues.length > 0 && fold('problems', `Problems (${fmt.num(report.issues.length)})`, '"NA" and "Not Found" count as empty', issuesContent()),
       h('div', { class: 'action-bar' },
         action,
@@ -397,8 +410,15 @@ export async function render(root, params, ctx, isCurrent) {
     window.scrollTo(0, y);
   }
 
-  function duplicatesContent(onChange) {
-    const choices = [['merge', 'Merge (fill empty fields)'], ['skip', 'Skip'], ['create', 'Create new']];
+  /** "From week1.xlsx · Tue, Nov 3 · List: Week 1", or "Added by hand · Tue, Nov 3". */
+  const sourceLine = (e) => [
+    e.file ? `From ${e.file}${e.sameFile ? ' (this file)' : ''}` : 'Added by hand',
+    fmt.date(e.at),
+    e.lists.length ? `${e.lists.length === 1 ? 'List' : 'Lists'}: ${e.lists.join(', ')}` : null,
+  ].filter(Boolean).join(' · ');
+
+  function duplicatesContent(onChange, flagged) {
+    const choices = [['merge', 'Merge (fill empty fields)'], ['skip', 'Skip'], ['create', 'Create anyway']];
     const rows = report.duplicates.map((d) => [d, select(choices, decisions[d.ref], {
       'aria-label': `What to do with ${d.label}`,
       onchange: (event) => {
@@ -417,14 +437,30 @@ export async function render(root, params, ctx, isCurrent) {
         onChange();
       },
     });
+    // Rows matching leads from other uploads (or typed in) are what the person usually wants to see; rows from an earlier sync of this file are expected.
+    const sameFile = report.duplicates.filter((d) => d.existing.sameFile).length;
+    const weak = report.duplicates.filter((d) => d.existing.weak).length;
+    const summary = [
+      sameFile < report.duplicates.length && `Other uploads or added by hand: ${fmt.num(report.duplicates.length - sameFile)}`,
+      sameFile > 0 && `This same file, synced before: ${fmt.num(sameFile)}`,
+    ].filter(Boolean).join(' · ');
     return h('div', { class: 'stack' },
-      h('div', { class: 'row end' }, setAll),
+      h('div', { class: 'panel-head' }, h('span', { class: 'muted' }, summary), setAll),
+      weak > 0 && h('div', { class: 'note' },
+        `${counted(weak, 'row shares', 'rows share')} an email or phone number with a lead under a different name. ${weak === 1 ? 'It is' : 'They are'} skipped unless you choose otherwise.`),
+      flagged > report.duplicates.length && h('p', { class: 'muted' }, `Showing the first ${fmt.num(report.duplicates.length)}. The rest follow the suggestion.`),
       h('div', { class: 'table-wrap scroll' }, h('table', { class: 'table' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'In the sheet'), h('th', {}, 'Matches'), h('th', {}, 'Matched by'), h('th', {}, 'What to do'))),
+        h('thead', {}, h('tr', {}, h('th', {}, 'In the sheet'), h('th', {}, 'Already in the CRM'), h('th', {}, 'Matching fields'), h('th', {}, 'What to do'))),
         h('tbody', {}, rows.map(([d, el]) => h('tr', {},
-          h('td', {}, badge(d.kind === 'company' ? 'Company' : 'Contact', 'neutral'), ' ', d.label),
-          h('td', {}, h('a', { href: d.kind === 'company' ? `#/company/${d.existing.id}` : `#/contact/${d.existing.id}`, target: '_blank' }, d.existing.label)),
-          h('td', {}, d.existing.by),
+          h('td', { class: 'title-cell' },
+            badge(d.kind === 'company' ? 'Company' : 'Contact', 'neutral'), ' ', d.label,
+            h('div', { class: 'sub' }, `${d.sheet} · row ${d.row}`)),
+          h('td', { class: 'title-cell' },
+            h('a', { href: d.kind === 'company' ? `#/company/${d.existing.id}` : `#/contact/${d.existing.id}`, target: '_blank' }, d.existing.label),
+            h('div', { class: 'sub' }, sourceLine(d.existing))),
+          h('td', { class: 'title-cell' },
+            d.existing.matched.map((m) => h('div', {}, h('span', { class: 'muted' }, `${m.label}: `), m.value)),
+            d.existing.weak && h('div', {}, badge('Different name', 'warn'))),
           h('td', {}, el)))))));
   }
 
@@ -448,7 +484,7 @@ export async function render(root, params, ctx, isCurrent) {
       h('div', { class: 'done-numbers' },
         number(companies.created, 'new companies'),
         number(contacts.created, 'new contacts'),
-        number(companies.merged + contacts.merged, 'already in the CRM'),
+        number(companies.merged + contacts.merged, 'duplicates merged'),
         skipped > 0 && number(skipped, 'skipped')),
       contacts.unmatched > 0 && h('p', { class: 'muted' }, `${counted(contacts.unmatched, 'contact', 'contacts')} skipped because their company was not found.`),
       list && h('p', { class: 'muted' }, list.added !== undefined ? `${counted(list.added, 'new lead', 'new leads')} added to "${list.name}".` : `Call list "${list.name}" is ready.`),

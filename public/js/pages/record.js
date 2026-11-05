@@ -58,7 +58,9 @@ function detailsCard(ctx, title, fields, record, endpoint, onSaved, { owner = fa
     fill(body,
       h('dl', { class: 'details' },
         filled.map(([key, label]) => h('div', {}, h('dt', {}, label), h('dd', {}, displayValue(ctx, key, record[key])))),
-        owner && h('div', {}, h('dt', {}, 'Owner (who calls this lead)'), h('dd', {}, ownerName || '—'))),
+        owner && h('div', {}, h('dt', {}, 'Owner (who calls this lead)'), h('dd', {}, ownerName || '—')),
+        // Where the record came from: the file an import created it from, or typed in.
+        h('div', {}, h('dt', {}, 'Source'), h('dd', {}, [record.source ? `Imported from ${record.source}` : 'Added by hand', fmt.date(record.created_at)].join(' · ')))),
       blank > 0 && h('p', { class: 'muted small section-gap' }, `${blank} empty field${blank === 1 ? ' is' : 's are'} hidden. Choose Edit to fill ${blank === 1 ? 'it' : 'them'} in.`));
   };
 
@@ -203,6 +205,13 @@ function tasksCard(ctx, detail, { contactId, companyId, onChange }) {
 
 const STAGE_NAME = (ctx, key) => Object.fromEntries(ctx.meta.stages)[key] || key || '—';
 
+// What an import did with a later row that repeated this record.
+const DUPLICATE_RESULT = {
+  merge: 'merged into this record, empty fields filled',
+  skip: 'skipped, nothing changed',
+  create: 'created as a separate record anyway',
+};
+
 function describe(ctx, entry) {
   const d = entry.details || {};
   const what = { company: 'Company', contact: 'Contact', deal: 'Pipeline' }[entry.entity] || entry.entity;
@@ -214,9 +223,11 @@ function describe(ctx, entry) {
     case 'created':
       return `${what} created`;
     case 'imported':
-      return `${what} imported from a spreadsheet`;
+      return `${what} imported from ${d.file || 'a spreadsheet'}`;
     case 'merged from import':
       return `${what} gaps filled from a spreadsheet: ${changes()}`;
+    case 'duplicate in import':
+      return `${what} repeated in ${d.file} (${d.sheet}, row ${d.row}), matching on ${d.matched}: ${DUPLICATE_RESULT[d.result] || d.result}`;
     case 'updated':
       return `${what} edited: ${changes()}`;
     case 'stage_changed':

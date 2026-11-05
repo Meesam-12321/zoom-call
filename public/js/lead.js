@@ -1,5 +1,6 @@
 // The lead panel: who the caller is talking to, their numbers, local time, research note, script and history.
 import { canEditNote, noteDialog } from './followup.js';
+import { nameEmailEdit } from './leadedit.js';
 import { canEmail, emailButton, emailLink } from './mail.js';
 import { badge, fill, fmt, h, icon, outcomeBadge, stageBadge } from './ui.js';
 
@@ -102,8 +103,11 @@ export function taskList(ctx, tasks) {
     h('p', {}, t.title))));
 }
 
-/** `activity: false` leaves out open tasks and recent calls, for pages that show them in their own cards. */
-export function leadPanel(ctx, detail, { onCall, onEmailSent, compact = false, activity = true } = {}) {
+/**
+ * `activity: false` leaves out open tasks and recent calls, for pages that show them in their own cards.
+ * `onEdit` adds "Edit name and email" for fixing the lead while calling; it runs after a save so the page can redraw the panel.
+ */
+export function leadPanel(ctx, detail, { onCall, onEmailSent, onEdit, compact = false, activity = true } = {}) {
   const { contact, company, deal, calls = [], tasks = [], invalid = [] } = detail;
   const blocked = Boolean(contact?.do_not_call || company.do_not_call);
   const max = ctx.meta.settings.max_attempts;
@@ -120,18 +124,22 @@ export function leadPanel(ctx, detail, { onCall, onEmailSent, compact = false, a
     .map(([name, url]) => h('a', { class: 'badge neutral link-chip', href: url.href, target: '_blank', rel: 'noopener noreferrer', title: url.href }, name));
   const sources = urlLinks([company.source_urls, contact?.source_urls].filter(Boolean).join('\n'));
 
+  const edit = onEdit && nameEmailEdit(detail, onEdit);
+
   return h('section', { class: 'card panel lead' },
     h('div', { class: 'lead-head' },
       h('div', {},
         h('h2', {}, contact ? fmt.name(contact) : company.name),
         h('div', { class: 'muted' },
           contact?.job_title ? `${contact.job_title} · ` : '',
-          contact ? h('a', { href: `#/company/${company.id}` }, company.name) : [company.city, company.state].filter(Boolean).join(', '))),
+          contact ? h('a', { href: `#/company/${company.id}` }, company.name) : [company.city, company.state].filter(Boolean).join(', ')),
+        edit?.button),
       h('div', { class: 'row' },
         deal && stageBadge(ctx, deal.stage),
         contact && contact.role_type !== 'other' && badge(roles[contact.role_type] || contact.role_type, 'info'),
         blocked && badge('Do Not Call', 'missed'),
         contact && badge(`${contact.attempts}/${max} attempts`, contact.attempts >= max ? 'missed' : 'neutral'))),
+    edit?.editor,
     h('div', { class: 'facts' },
       kv('Their local time', fmt.localTime(company.time_zone)),
       kv('Location', [company.city, company.state].filter(Boolean).join(', ') || '—'),

@@ -403,8 +403,9 @@ export function openModal({ title, body, footer, wide = false, dismissable = tru
   const onKey = (event) => {
     if (event.key === 'Escape' && dismissable) close();
   };
+  const heading = h('h2', {}, title);
   const dialog = h('div', { class: `modal${wide ? ' wide' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('div', { class: 'modal-head' }, h('h2', {}, title),
+    h('div', { class: 'modal-head' }, heading,
       dismissable && h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: close }, icon('x'))),
     h('div', { class: 'modal-body' }, body),
     footer && h('div', { class: 'modal-foot' }, footer));
@@ -412,7 +413,14 @@ export function openModal({ title, body, footer, wide = false, dismissable = tru
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);
   dialog.querySelector('input:not([type=radio]), textarea, select')?.focus();
-  return { close, dialog };
+  return {
+    close,
+    dialog,
+    setTitle(text) {
+      heading.textContent = text;
+      dialog.setAttribute('aria-label', text);
+    },
+  };
 }
 
 export function confirmDialog({ title, message, confirm = 'Confirm', danger = false }) {

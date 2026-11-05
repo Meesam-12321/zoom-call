@@ -101,6 +101,7 @@ export const DISPOSITION_ACTIONS = [
 export const DEFAULT_DISPOSITIONS = [
   { key: 'no_answer', label: 'No answer', connected: 0, action: 'retry', retry_days: 1, task_title: 'Retry call' },
   { key: 'voicemail', label: 'Voicemail left', connected: 0, action: 'retry', retry_days: 2, task_title: 'Retry call' },
+  { key: 'hung_up', label: 'Hung up', connected: 0, action: 'retry', retry_days: 2, task_title: 'Retry call' },
   { key: 'gatekeeper', label: 'Gatekeeper', connected: 1, action: 'retry', retry_days: 2, task_title: 'Retry call and ask for the decision maker' },
   { key: 'conversation', label: 'Had a conversation', connected: 1, action: 'none' },
   { key: 'callback', label: 'Call back later', connected: 1, action: 'callback', task_title: 'Callback' },
